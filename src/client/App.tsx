@@ -17,7 +17,7 @@ import { ListsView } from './views/ListsView.js';
 import { MealsView } from './views/MealsView.js';
 import { ScreensaverOverlay } from './views/ScreensaverOverlay.js';
 import { SettingsView } from './views/SettingsView.js';
-import type { AppSettings, FamilyMember } from '../shared/types.js';
+import { GROCERY_CATEGORIES, type AppSettings, type FamilyMember } from '../shared/types.js';
 
 type NavTab = 'calendar' | 'chores' | 'lists' | 'meals' | 'settings';
 
@@ -34,6 +34,9 @@ const FALLBACK_SETTINGS: AppSettings = {
   weatherLocationName: 'Local Weather',
   weatherUnit: 'F',
   showDinnerOnCalendar: true,
+  showBirthdays: true,
+  showHolidays: true,
+  groceryAisleOrder: [...GROCERY_CATEGORIES],
   defaultGroceryListId: 'list-groceries',
   googleClientId: '',
   googleClientSecretConfigured: false,

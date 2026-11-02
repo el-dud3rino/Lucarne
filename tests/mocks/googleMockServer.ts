@@ -20,6 +20,7 @@ export interface MockCalendar {
 
 export interface MockPhotoItem {
   id: string;
+  type?: 'PHOTO' | 'VIDEO';
   mediaFile: {
     baseUrl: string;
     mediaFileMetadata?: {
@@ -356,8 +357,14 @@ export class MockGoogleServer {
         },
       ];
 
+      // Paginate like Google (pageSize / opaque pageToken) so album-sized imports are exercised.
+      const pageSize = Math.max(1, Number(parsedUrl.searchParams.get('pageSize')) || 25);
+      const offset = Number(parsedUrl.searchParams.get('pageToken') || 0) || 0;
+      const page = items.slice(offset, offset + pageSize);
+      const next = offset + pageSize < items.length ? String(offset + pageSize) : undefined;
+
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ mediaItems: items }));
+      res.end(JSON.stringify({ mediaItems: page, ...(next ? { nextPageToken: next } : {}) }));
       return;
     }
 

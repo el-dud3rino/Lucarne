@@ -20,7 +20,7 @@ test('End-to-End User Flows: Calendar, Chores & Stars, Groceries, Meals & Cook M
     // 1. CALENDAR EVENT FLOW (Create, View, Edit, Delete)
     // =========================================================
     // Verify default view is Calendar
-    await page.waitForSelector('text=4-Day');
+    await page.waitForSelector('text=5-Day');
 
     // Click "+" button on the first day column
     const addEventBtn = page.locator('button[title="Add event"]').first();

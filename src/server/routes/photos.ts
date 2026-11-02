@@ -8,7 +8,14 @@ import {
   createPhotosPickerSession,
   pollAndImportPhotosPickerSession,
 } from '../services/google.js';
-import type { PhotoItem } from '../../shared/types.js';
+import type { PhotoItem, SharedPhotoAlbum } from '../../shared/types.js';
+import {
+  addSharedAlbum,
+  getAlbumProgress,
+  queueAlbumSync,
+  removeSharedAlbum,
+  SharedAlbumError,
+} from '../services/sharedAlbums.js';
 
 export const photosRouter = new Hono();
 
@@ -142,6 +149,7 @@ function mapPhotoRow(row: Record<string, unknown>): PhotoItem {
     orientation: (row.orientation as PhotoItem['orientation']) || 'landscape',
     caption: String(row.caption || ''),
     source: (row.source as PhotoItem['source']) || 'starter',
+    albumId: row.album_id ? String(row.album_id) : null,
     createdAt: String(row.created_at),
   };
 }
@@ -151,6 +159,47 @@ photosRouter.get('/', (c) => {
     .prepare('SELECT * FROM photos ORDER BY created_at DESC')
     .all() as Record<string, unknown>[];
   return c.json(rows.map(mapPhotoRow));
+});
+
+// ---- Shared Google Photos albums (link-based, auto-updating) ----
+function listAlbums(): SharedPhotoAlbum[] {
+  const rows = db.prepare('SELECT * FROM photo_albums ORDER BY created_at ASC').all() as Record<string, unknown>[];
+  return rows.map((r) => ({
+    id: String(r.id),
+    shareUrl: String(r.share_url),
+    title: String(r.title || 'Shared album'),
+    photoCount: Number(r.photo_count || 0),
+    lastSyncedAt: r.last_synced_at ? String(r.last_synced_at) : null,
+    syncError: r.sync_error ? String(r.sync_error) : null,
+    progress: getAlbumProgress(String(r.id)),
+  }));
+}
+
+photosRouter.get('/albums', (c) => c.json(listAlbums()));
+
+photosRouter.post('/albums', async (c) => {
+  const { url } = await c.req.json<{ url?: string }>();
+  if (!url?.trim()) return c.json({ error: 'Paste a shared album link.' }, 400);
+  try {
+    await addSharedAlbum(url);
+    return c.json(listAlbums(), 201);
+  } catch (err) {
+    const message =
+      err instanceof SharedAlbumError ? err.message : `Could not open that album link: ${(err as Error).message}`;
+    return c.json({ error: message }, 400);
+  }
+});
+
+photosRouter.post('/albums/:id/sync', (c) => {
+  const id = c.req.param('id');
+  if (!db.prepare('SELECT 1 FROM photo_albums WHERE id = ?').get(id)) return c.json({ error: 'Album not found' }, 404);
+  queueAlbumSync(id);
+  return c.json(listAlbums());
+});
+
+photosRouter.delete('/albums/:id', (c) => {
+  removeSharedAlbum(c.req.param('id'));
+  return c.json(listAlbums());
 });
 
 photosRouter.get('/media/:id', (c) => {

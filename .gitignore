@@ -10,3 +10,7 @@ Thumbs.db
 test-results/
 playwright-report/
 .agents/
+
+# Google Keep bridge virtualenv
+keep-bridge/.venv/
+__pycache__/

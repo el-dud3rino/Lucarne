@@ -72,7 +72,7 @@ test('Kiosk 1920x1080 Zero Overflow & Touch Target Sizes across views', async ()
     };
 
     // 1. Calendar View: Schedule sub-view (default)
-    await page.waitForSelector('text=4-Day');
+    await page.waitForSelector('text=5-Day');
     await assertZeroHorizontalOverflow('Calendar Schedule');
     await assertPrimaryControlTouchTargets('Calendar Schedule');
 

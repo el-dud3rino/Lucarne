@@ -1,11 +1,12 @@
 import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Plus, ShoppingCart, Trash2, Sparkles, Settings2, X } from 'lucide-react';
+import { ArrowRightLeft, Check, ListOrdered, Plus, ShoppingCart, Trash2, Sparkles, Settings2, X } from 'lucide-react';
 import { apiFetch } from '../lib/api.js';
-import { classifyGroceryItem } from '../../shared/groceryClassifier.js';
+import { classifyGroceryItem, orderAisles } from '../../shared/groceryClassifier.js';
+import { AISLE_ICONS, AislePickerSheet, StoreOrderSheet } from '../components/AisleSheets.js';
 import { parseItemInput } from '../../shared/ingredientAggregator.js';
 import {
-  GROCERY_CATEGORIES,
+  type AppSettings,
   type GroceryCategory,
   type ListItem,
   type TaskList,
@@ -24,17 +25,7 @@ const QUICK_STAPLES = [
   'Paper Towels',
 ];
 
-const AISLE_ICONS: Record<GroceryCategory, string> = {
-  Produce: '🥬',
-  'Dairy & Eggs': '🥛',
-  'Meat & Seafood': '🥩',
-  Bakery: '🥖',
-  Frozen: '🧊',
-  Pantry: '🫙',
-  'Snacks & Drinks': '🥤',
-  Household: '🧻',
-  Other: '📌',
-};
+
 
 export const ListsView: React.FC = () => {
   const queryClient = useQueryClient();
@@ -99,6 +90,40 @@ export const ListsView: React.FC = () => {
   });
 
   // 0ms Optimistic Check Toggle
+  // Aisle moves (remembered server-side) and store order (household setting)
+  const [movingItem, setMovingItem] = useState<ListItem | null>(null);
+  const [editingStoreOrder, setEditingStoreOrder] = useState(false);
+  const { data: appSettings } = useQuery({
+    queryKey: ['settings'],
+    queryFn: () => apiFetch<AppSettings>('/api/settings'),
+  });
+  const aisleOrder = useMemo(() => orderAisles(appSettings?.groceryAisleOrder), [appSettings?.groceryAisleOrder]);
+
+  const moveItemMutation = useMutation({
+    mutationFn: ({ item, category }: { item: ListItem; category: GroceryCategory }) =>
+      apiFetch<ListItem>(`/api/lists/items/${item.id}`, { method: 'PUT', body: JSON.stringify({ category }) }),
+    onMutate: async ({ item, category }) => {
+      await queryClient.cancelQueries({ queryKey: itemsKey });
+      const prev = queryClient.getQueryData<ListItem[]>(itemsKey) || [];
+      queryClient.setQueryData<ListItem[]>(itemsKey, prev.map((i) => (i.id === item.id ? { ...i, category } : i)));
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(itemsKey, ctx.prev);
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['lists'] }),
+  });
+
+  const storeOrderMutation = useMutation({
+    mutationFn: (order: GroceryCategory[]) =>
+      apiFetch<AppSettings>('/api/settings', { method: 'PUT', body: JSON.stringify({ groceryAisleOrder: order }) }),
+    onMutate: (order) => {
+      queryClient.setQueryData<AppSettings>(['settings'], (prev) => (prev ? { ...prev, groceryAisleOrder: order } : prev));
+    },
+    onSuccess: () => setEditingStoreOrder(false),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['settings'] }),
+  });
+
   const toggleItemMutation = useMutation({
     mutationFn: async (item: ListItem) =>
       apiFetch<ListItem>(`/api/lists/items/${item.id}`, {
@@ -213,14 +238,14 @@ export const ListsView: React.FC = () => {
       return [{ category: 'Other' as GroceryCategory, items: uncheckedItems }];
     }
     const groups: Array<{ category: GroceryCategory; items: ListItem[] }> = [];
-    for (const cat of GROCERY_CATEGORIES) {
+    for (const cat of aisleOrder) {
       const catItems = uncheckedItems.filter((i) => i.category === cat);
       if (catItems.length > 0) {
         groups.push({ category: cat, items: catItems });
       }
     }
     return groups;
-  }, [activeList?.isGrocery, uncheckedItems]);
+  }, [activeList?.isGrocery, uncheckedItems, aisleOrder]);
 
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -317,6 +342,26 @@ export const ListsView: React.FC = () => {
         )}
       </div>
 
+      {movingItem && (
+        <AislePickerSheet
+          itemText={movingItem.text}
+          current={movingItem.category}
+          onClose={() => setMovingItem(null)}
+          onPick={(category) => {
+            if (category !== movingItem.category) moveItemMutation.mutate({ item: movingItem, category });
+            setMovingItem(null);
+          }}
+        />
+      )}
+      {editingStoreOrder && (
+        <StoreOrderSheet
+          order={aisleOrder}
+          saving={storeOrderMutation.isPending}
+          onClose={() => setEditingStoreOrder(false)}
+          onSave={(order) => storeOrderMutation.mutate(order)}
+        />
+      )}
+
       {/* Main List Workspace */}
       {activeList && (
         <div className="flex-1 flex flex-col bg-white rounded-3xl border border-stone-200/90 shadow-2xs overflow-hidden min-h-0">
@@ -332,6 +377,18 @@ export const ListsView: React.FC = () => {
                   </span>
                 )}
               </div>
+              <div className="flex items-center gap-2">
+              {activeList.isGrocery && (
+                <button
+                  type="button"
+                  onClick={() => setEditingStoreOrder(true)}
+                  className="h-10 min-h-[40px] px-3.5 rounded-xl bg-white hover:bg-stone-100 border border-stone-200 text-xs font-bold text-slate-700 flex items-center gap-1.5 shadow-2xs active:scale-95"
+                  title="Arrange aisles in your store's order"
+                >
+                  <ListOrdered className="w-4 h-4 text-stone-500" />
+                  <span>Store order</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setEditingList(activeList)}
@@ -341,6 +398,7 @@ export const ListsView: React.FC = () => {
                 <Settings2 className="w-4 h-4 text-stone-500" />
                 <span>Manage List</span>
               </button>
+              </div>
             </div>
 
             <form onSubmit={handleAddSubmit} className="flex gap-2">
@@ -445,6 +503,15 @@ export const ListsView: React.FC = () => {
                               {item.quantity}
                             </span>
                           )}
+                          <button
+                            type="button"
+                            onClick={() => setMovingItem(item)}
+                            className="w-10 h-10 min-w-[40px] min-h-[40px] rounded-xl text-stone-400 hover:text-sky-600 hover:bg-sky-50 flex items-center justify-center shrink-0"
+                            aria-label={`Move ${item.text} to another aisle`}
+                            title="Move to another aisle"
+                          >
+                            <ArrowRightLeft className="w-4 h-4" />
+                          </button>
                         </div>
                       ))}
                     </div>

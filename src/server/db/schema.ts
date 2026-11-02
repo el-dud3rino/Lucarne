@@ -1,5 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { db, runTransaction } from './connection.js';
+import { categoryForCalendar, categoryForEvent, type EventCategory } from '../../shared/eventCategories.js';
+import { classifyGroceryItem } from '../../shared/groceryClassifier.js';
 
 export interface Migration {
   version: number;
@@ -199,6 +201,155 @@ export const migrations: Migration[] = [
         d.exec('ALTER TABLE outbox_mutations ADD COLUMN next_retry_at INTEGER DEFAULT NULL');
       }
       d.exec('CREATE INDEX IF NOT EXISTS idx_events_recurrence ON events(recurrence_rule)');
+    },
+  },
+  {
+    version: 2,
+    name: '002_google_keep_list_bridge',
+    up: (d: DatabaseSync) => {
+      d.exec(`
+        CREATE TABLE IF NOT EXISTS keep_list_links (
+          list_id TEXT PRIMARY KEY REFERENCES lists(id) ON DELETE CASCADE,
+          keep_note_id TEXT NOT NULL,
+          keep_note_title TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS keep_item_links (
+          list_id TEXT NOT NULL REFERENCES lists(id) ON DELETE CASCADE,
+          local_item_id TEXT NOT NULL,
+          keep_item_id TEXT NOT NULL,
+          last_keep_text TEXT NOT NULL,
+          last_local_text TEXT NOT NULL,
+          last_checked INTEGER NOT NULL,
+          PRIMARY KEY (list_id, keep_item_id)
+        );
+      `);
+    },
+  },
+  {
+    version: 3,
+    name: '003_google_keep_chore_bridge',
+    up: (d: DatabaseSync) => {
+      d.exec(`
+        CREATE TABLE IF NOT EXISTS keep_chore_links (
+          member_id TEXT PRIMARY KEY REFERENCES family_members(id) ON DELETE CASCADE,
+          keep_note_id TEXT NOT NULL,
+          keep_note_title TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS keep_chore_item_links (
+          member_id TEXT NOT NULL REFERENCES family_members(id) ON DELETE CASCADE,
+          chore_id TEXT NOT NULL,
+          keep_item_id TEXT NOT NULL,
+          last_keep_text TEXT NOT NULL,
+          last_local_text TEXT NOT NULL,
+          last_checked INTEGER NOT NULL,
+          PRIMARY KEY (member_id, keep_item_id)
+        );
+      `);
+    },
+  },
+  {
+    version: 4,
+    name: '004_calendar_multi_member_and_source_errors',
+    up: (d: DatabaseSync) => {
+      if (!columnExists('calendar_sources', 'member_ids_json')) {
+        d.exec("ALTER TABLE calendar_sources ADD COLUMN member_ids_json TEXT NOT NULL DEFAULT '[]'");
+        d.exec(
+          "UPDATE calendar_sources SET member_ids_json = json_array(member_id) WHERE member_id IS NOT NULL AND member_id != ''"
+        );
+      }
+      if (!columnExists('calendar_sources', 'sync_error')) {
+        d.exec('ALTER TABLE calendar_sources ADD COLUMN sync_error TEXT DEFAULT NULL');
+      }
+    },
+  },
+  {
+    version: 5,
+    name: '005_shared_photo_albums',
+    up: (d: DatabaseSync) => {
+      d.exec(`
+        CREATE TABLE IF NOT EXISTS photo_albums (
+          id TEXT PRIMARY KEY,
+          share_url TEXT NOT NULL,
+          album_key TEXT NOT NULL UNIQUE,
+          auth_key TEXT NOT NULL,
+          title TEXT NOT NULL DEFAULT '',
+          enabled INTEGER NOT NULL DEFAULT 1,
+          photo_count INTEGER NOT NULL DEFAULT 0,
+          last_synced_at TEXT,
+          sync_error TEXT,
+          created_at TEXT NOT NULL
+        );
+      `);
+      if (!columnExists('photos', 'album_id')) {
+        d.exec('ALTER TABLE photos ADD COLUMN album_id TEXT DEFAULT NULL');
+      }
+      d.exec('CREATE INDEX IF NOT EXISTS idx_photos_album ON photos(album_id, external_id)');
+    },
+  },
+  {
+    version: 6,
+    name: '006_birthday_holiday_categories',
+    up: (d: DatabaseSync) => {
+      if (!columnExists('calendar_sources', 'category')) {
+        d.exec('ALTER TABLE calendar_sources ADD COLUMN category TEXT DEFAULT NULL');
+      }
+      if (!columnExists('events', 'category')) {
+        d.exec('ALTER TABLE events ADD COLUMN category TEXT DEFAULT NULL');
+      }
+      // Backfill: holiday / birthday calendars by ID or name, then each event (calendar wins, else "…Birthday" title).
+      const sources = d.prepare('SELECT id, external_calendar_id, name FROM calendar_sources').all() as Array<{
+        id: string;
+        external_calendar_id: string;
+        name: string;
+      }>;
+      const catBySource = new Map<string, EventCategory | null>();
+      for (const s of sources) {
+        const cat = categoryForCalendar(s.external_calendar_id, s.name);
+        catBySource.set(s.id, cat);
+        d.prepare('UPDATE calendar_sources SET category = ? WHERE id = ?').run(cat, s.id);
+      }
+      const events = d.prepare('SELECT id, title, calendar_source_id FROM events').all() as Array<{
+        id: string;
+        title: string;
+        calendar_source_id: string | null;
+      }>;
+      const setCat = d.prepare('UPDATE events SET category = ? WHERE id = ?');
+      for (const e of events) {
+        setCat.run(categoryForEvent(catBySource.get(e.calendar_source_id ?? '') ?? null, e.title), e.id);
+      }
+    },
+  },
+  {
+    version: 7,
+    name: '007_recipe_nutrition',
+    up: (d: DatabaseSync) => {
+      if (!columnExists('recipes', 'nutrition_json')) {
+        d.exec('ALTER TABLE recipes ADD COLUMN nutrition_json TEXT DEFAULT NULL');
+      }
+    },
+  },
+  {
+    version: 8,
+    name: '008_grocery_aisle_overrides',
+    up: (d: DatabaseSync) => {
+      d.exec(`
+        CREATE TABLE IF NOT EXISTS grocery_aisle_overrides (
+          name_key TEXT PRIMARY KEY,
+          category TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+      `);
+      // One-time re-sort of existing grocery items with the improved aisle rules (there was no way to
+      // move items by hand before this version, so nothing user-chosen is overwritten).
+      const items = d
+        .prepare('SELECT li.id, li.text FROM list_items li JOIN lists l ON l.id = li.list_id WHERE l.is_grocery = 1')
+        .all() as Array<{ id: string; text: string }>;
+      const setCat = d.prepare('UPDATE list_items SET category = ? WHERE id = ?');
+      for (const it of items) setCat.run(classifyGroceryItem(it.text), it.id);
     },
   },
 ];

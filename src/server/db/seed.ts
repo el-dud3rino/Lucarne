@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { db, runTransaction } from './connection.js';
-import type { AppSettings, Recipe } from '../../shared/types.js';
+import { GROCERY_CATEGORIES, type AppSettings, type Recipe } from '../../shared/types.js';
 
 function localDateStr(offsetDays = 0): string {
   const d = new Date();
@@ -31,6 +31,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   weatherLocationName: 'Local Weather',
   weatherUnit: 'F',
   showDinnerOnCalendar: true,
+  showBirthdays: true,
+  showHolidays: true,
+  groceryAisleOrder: [...GROCERY_CATEGORIES],
   defaultGroceryListId: 'list-groceries',
   googleClientId: '',
   googleClientSecretConfigured: false,

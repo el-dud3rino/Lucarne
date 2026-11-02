@@ -40,7 +40,7 @@ Lucarne is a local-first, appliance-grade family hub designed for a `1920×1080`
 | 8 | 40×40px Minimum Touch Target Compliance | Enlarge all 15+ undersized interactive controls to >= 40×40px CSS | M2 | R1, Acceptance Criteria |
 | 9 | 1920×1080 Touchscreen & Zero Overflow | Zero horizontal scroll overflow (`scrollWidth <= clientWidth`), crisp 1080p kiosk layout | M2 | R1, Acceptance Criteria |
 | 10 | Mobile Companion Layout (<768px) | Bottom navigation, vertical day column scroll, quantity input visible on mobile lists | M2 | R1 |
-| 11 | Calendar Multi-Day & Recurring UI | `endDateStr` input for multi-day events, recurrence frequency selector, 4-day, per-person, week, month, dinner strip | M3 | R2, Acceptance Criteria |
+| 11 | Calendar Multi-Day & Recurring UI | `endDateStr` input for multi-day events, recurrence frequency selector, 5-day, per-person, week, month, dinner strip | M3 | R2, Acceptance Criteria |
 | 12 | Chores Frequencies & Star Ledger | Weekly days-of-week picker, one-off date picker, routines, shared chore claiming, star ledger | M3 | R2, Acceptance Criteria |
 | 13 | Grocery Lists & Real-time Live Sync | Multiple lists, aisle grouping, quick staples, quantity handling, SSE live sync | M3 | R2, Acceptance Criteria |
 | 14 | Meal Planner, Recipe Library & Cook Mode | Weekly planner, recipe search, 1920×1080 Cook Mode, ingredient aggregation modal | M3 | R3, Acceptance Criteria |

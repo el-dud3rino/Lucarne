@@ -9,8 +9,11 @@ import {
   getGoogleOAuthConfig,
   revokeGoogleToken,
   syncAllEnabledCalendars,
+  sourceMemberIds,
 } from '../services/google.js';
 import { getGeminiApiKey } from '../services/recipes.js';
+import { categoryForEvent, isEventCategory } from '../../shared/eventCategories.js';
+import { orderAisles } from '../../shared/groceryClassifier.js';
 import type { AppSettings, CalendarSource, FamilyMember, GoogleAccountInfo } from '../../shared/types.js';
 
 export const settingsRouter = new Hono();
@@ -57,6 +60,9 @@ export function loadAppSettings(): AppSettings & {
     showDinnerOnCalendar: Boolean(
       map.showDinnerOnCalendar ?? DEFAULT_SETTINGS.showDinnerOnCalendar
     ),
+    showBirthdays: Boolean(map.showBirthdays ?? DEFAULT_SETTINGS.showBirthdays),
+    showHolidays: Boolean(map.showHolidays ?? DEFAULT_SETTINGS.showHolidays),
+    groceryAisleOrder: orderAisles(Array.isArray(map.groceryAisleOrder) ? (map.groceryAisleOrder as string[]) : null),
     defaultGroceryListId: String(
       map.defaultGroceryListId ?? DEFAULT_SETTINGS.defaultGroceryListId
     ),
@@ -100,6 +106,9 @@ settingsRouter.put('/', async (c) => {
     'weatherUnit',
     'weatherRefreshMinutes',
     'showDinnerOnCalendar',
+    'showBirthdays',
+    'showHolidays',
+    'groceryAisleOrder',
     'defaultGroceryListId',
     'googleClientId',
   ] as const;
@@ -159,7 +168,9 @@ settingsRouter.get('/google/accounts', (c) => {
     accountEmail: String(s.account_email),
     externalCalendarId: String(s.external_calendar_id),
     name: String(s.name),
-    memberId: s.member_id ? String(s.member_id) : null,
+    memberIds: sourceMemberIds(s as { member_ids_json?: string; member_id?: string }),
+    syncError: s.sync_error ? String(s.sync_error) : null,
+    category: isEventCategory(s.category) ? s.category : null,
     enabled: Boolean(s.enabled),
     isWritable: Boolean(s.is_writable),
     lastSyncedAt: s.last_synced_at ? String(s.last_synced_at) : null,
@@ -251,30 +262,41 @@ settingsRouter.post('/google/disconnect', async (c) => {
 
 settingsRouter.put('/google/sources/:id', async (c) => {
   const id = c.req.param('id');
-  const body = await c.req.json<{ enabled?: boolean; memberId?: string | null }>();
+  const body = await c.req.json<{ enabled?: boolean; memberIds?: string[]; category?: string | null }>();
   const existing = db.prepare('SELECT * FROM calendar_sources WHERE id = ?').get(id) as
     | Record<string, unknown>
     | undefined;
   if (!existing) return c.json({ error: 'Not found' }, 404);
 
   const enabled = body.enabled !== undefined ? (body.enabled ? 1 : 0) : Number(existing.enabled);
-  const memberId =
-    body.memberId !== undefined
-      ? body.memberId
-      : existing.member_id
-      ? String(existing.member_id)
-      : null;
-
-  db.prepare('UPDATE calendar_sources SET enabled = ?, member_id = ? WHERE id = ?').run(
-    enabled,
-    memberId,
-    id
+  const validIds = new Set(
+    (db.prepare('SELECT id FROM family_members').all() as Array<{ id: string }>).map((m) => m.id)
   );
+  const memberIds =
+    body.memberIds !== undefined
+      ? [...new Set(body.memberIds.map(String))].filter((m) => validIds.has(m))
+      : sourceMemberIds(existing as { member_ids_json?: string; member_id?: string });
 
-  // Also update existing cached events from this calendar source to reflect the newly mapped family member!
-  if (body.memberId !== undefined) {
+  db.prepare(
+    'UPDATE calendar_sources SET enabled = ?, member_ids_json = ?, member_id = ? WHERE id = ?'
+  ).run(enabled, JSON.stringify(memberIds), memberIds[0] ?? null, id);
+
+  // Birthday/holiday tag for the whole calendar (null = normal calendar; "…Birthday" titles still detected).
+  if (body.category !== undefined) {
+    const category = isEventCategory(body.category) ? body.category : null;
+    db.prepare('UPDATE calendar_sources SET category = ? WHERE id = ?').run(category, id);
+    const evs = db.prepare('SELECT id, title FROM events WHERE calendar_source_id = ?').all(id) as Array<{
+      id: string;
+      title: string;
+    }>;
+    const setCat = db.prepare('UPDATE events SET category = ? WHERE id = ?');
+    for (const ev of evs) setCat.run(categoryForEvent(category, ev.title), ev.id);
+  }
+
+  // Re-assign already-synced events from this calendar to the new set of people.
+  if (body.memberIds !== undefined) {
     db.prepare('UPDATE events SET member_ids_json = ? WHERE calendar_source_id = ?').run(
-      JSON.stringify(memberId ? [memberId] : []),
+      JSON.stringify(memberIds),
       id
     );
   }
@@ -285,17 +307,31 @@ settingsRouter.put('/google/sources/:id', async (c) => {
 });
 
 settingsRouter.post('/google/sync-now', async (c) => {
-  const accounts = db.prepare('SELECT id FROM google_accounts').all() as Array<{ id: string }>;
+  const accounts = db.prepare('SELECT id, email FROM google_accounts').all() as Array<{ id: string; email: string }>;
+  const failed: Array<{ calendar: string; account: string; message: string }> = [];
   for (const acc of accounts) {
     try {
       await discoverAccountCalendars(acc.id);
-    } catch {
-      // individual account errors recorded on row
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      failed.push({ calendar: 'Calendar list', account: acc.email, message });
+      db.prepare("UPDATE google_accounts SET sync_status = 'error', sync_error = ? WHERE id = ?").run(
+        `Could not list calendars: ${message}`,
+        acc.id
+      );
     }
   }
-  await syncAllEnabledCalendars();
+  let synced = 0;
+  try {
+    const summary = await syncAllEnabledCalendars(true);
+    synced = summary.synced;
+    failed.push(...summary.failed);
+  } catch (err) {
+    failed.push({ calendar: 'All calendars', account: '', message: err instanceof Error ? err.message : String(err) });
+  }
+  const eventCount = (db.prepare('SELECT COUNT(*) AS n FROM events WHERE calendar_source_id IS NOT NULL').get() as { n: number }).n;
   broadcastInvalidate(['settings', 'events']);
-  return c.json({ ok: true });
+  return c.json({ ok: failed.length === 0, accounts: accounts.length, synced, failed, eventCount });
 });
 
 function mapMemberRow(row: Record<string, unknown>): FamilyMember {

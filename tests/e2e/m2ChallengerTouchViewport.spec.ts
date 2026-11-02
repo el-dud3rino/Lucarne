@@ -115,7 +115,7 @@ test('Challenger M2: Touch Target Compliance & Multi-Viewport Overflow Stress', 
     const allUndersized: UndersizedElement[] = [];
 
     // 1.1 Calendar Schedule Sub-View
-    await page.waitForSelector('text=4-Day');
+    await page.waitForSelector('text=5-Day');
     allUndersized.push(...(await scanTouchTargets(page, 'Calendar (Schedule)')));
 
     // Open EventModal from Calendar
@@ -156,7 +156,7 @@ test('Challenger M2: Touch Target Compliance & Multi-Viewport Overflow Stress', 
     }
 
     // Switch back to schedule
-    const scheduleTab = page.locator('button', { hasText: '4-Day' });
+    const scheduleTab = page.locator('button', { hasText: '5-Day' });
     if (await scheduleTab.isVisible()) {
       await scheduleTab.click();
       await page.waitForTimeout(200);

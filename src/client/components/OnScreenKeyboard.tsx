@@ -200,13 +200,25 @@ export const OnScreenKeyboard: React.FC<OnScreenKeyboardProps> = ({ enabled }) =
       }, 120);
     };
 
+    // Submitting a form (Search button, Enter, or the keyboard's Done key) means typing is finished:
+    // close the keyboard so it doesn't cover the results that are about to appear.
+    const handleSubmit = () => {
+      const active = document.activeElement;
+      if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) active.blur();
+      stopRepeat();
+      restorePadding();
+      setTarget(null);
+    };
+
     document.addEventListener('focusin', handleFocusIn);
     document.addEventListener('input', handleInput);
     document.addEventListener('focusout', handleFocusOut);
+    document.addEventListener('submit', handleSubmit, true);
     return () => {
       document.removeEventListener('focusin', handleFocusIn);
       document.removeEventListener('input', handleInput);
       document.removeEventListener('focusout', handleFocusOut);
+      document.removeEventListener('submit', handleSubmit, true);
     };
   }, [enabled, target]);
 

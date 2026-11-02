@@ -18,6 +18,9 @@ import { mealsRouter } from './routes/meals.js';
 import { photosRouter } from './routes/photos.js';
 import { handleGoogleOAuthCallbackRoute, settingsRouter } from './routes/settings.js';
 import { syncAllEnabledCalendars } from './services/google.js';
+import { keepRouter } from './routes/keep.js';
+import { startKeepSyncLoop } from './services/keepSync.js';
+import { startSharedAlbumLoop } from './services/sharedAlbums.js';
 
 initSchema();
 seedIfNeeded();
@@ -86,6 +89,7 @@ app.route('/api/lists', listsRouter);
 app.route('/api/meals', mealsRouter);
 app.route('/api/photos', photosRouter);
 app.route('/api/settings', settingsRouter);
+app.route('/api/keep', keepRouter);
 
 // Serve locally cached media (photos & recipe images) with immutable cache headers for 0ms repeat loads
 app.get('/media/:bucket/:file', (c) => {
@@ -147,6 +151,12 @@ if (fs.existsSync(clientDist)) {
 setInterval(() => {
   syncAllEnabledCalendars().catch(() => {});
 }, 90_000).unref();
+
+// Two-way Google Keep list sync (no-op until a Keep list is linked)
+startKeepSyncLoop();
+
+// Daily re-sync of shared Google Photos albums (new photos appear on the frame automatically)
+startSharedAlbumLoop();
 
 // Automated daily SQLite rolling backup every 24h
 setInterval(() => {

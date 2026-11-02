@@ -173,6 +173,28 @@ test('Google Integration: multi-account, calendar mapping, syncToken, 410 recove
       assert.ok(stats.size > 0, 'Photo file must have valid bytes');
     }
 
+    // Album-sized pick: 230 photos + 1 video across several pages (Google pages at 100)
+    mockServer.pickedPhotos = [
+      ...Array.from({ length: 230 }, (_, i) => ({
+        id: `album_photo_${i}`,
+        mediaFile: { baseUrl: `${mockUrl}/media/album_${i}`, mediaFileMetadata: { width: 1920, height: 1080 } },
+      })),
+      { id: 'album_video', type: 'VIDEO' as const, mediaFile: { baseUrl: `${mockUrl}/media/video` } },
+    ];
+    const albumSession = await createPhotosPickerSession(accId1);
+    mockServer.photosSessions.set(albumSession.sessionId, { mediaItemsSet: true });
+    const albumPoll = await pollAndImportPhotosPickerSession(accId1, albumSession.sessionId);
+    assert.equal(albumPoll.importedCount, 230, 'every page of an album is imported, not just the first 100');
+    assert.equal(albumPoll.skippedVideoCount, 1, 'videos are skipped');
+    assert.equal(albumPoll.failedCount, 0);
+
+    // Re-picking the same album imports nothing new
+    const again = await createPhotosPickerSession(accId1);
+    mockServer.photosSessions.set(again.sessionId, { mediaItemsSet: true });
+    const againPoll = await pollAndImportPhotosPickerSession(accId1, again.sessionId);
+    assert.equal(againPoll.importedCount, 0);
+    assert.equal(againPoll.alreadyHadCount, 230);
+
   } finally {
     await mockServer.stop();
     try {

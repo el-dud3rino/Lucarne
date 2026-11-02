@@ -3,6 +3,8 @@ import { Hono } from 'hono';
 import { db } from '../db/connection.js';
 import { broadcastInvalidate } from '../sse.js';
 import type { Chore, ChoreCompletion, MemberStarStats } from '../../shared/types.js';
+import { localDateStr } from '../../shared/chores.js';
+import { scheduleKeepSync } from '../services/keepSync.js';
 
 export const choresRouter = new Hono();
 
@@ -40,7 +42,7 @@ function mapCompletionRow(row: Record<string, unknown>): ChoreCompletion {
 }
 
 choresRouter.get('/', (c) => {
-  const dateStr = c.req.query('date') || new Date().toISOString().slice(0, 10);
+  const dateStr = c.req.query('date') || localDateStr();
 
   const chores = (
     db
@@ -58,7 +60,7 @@ choresRouter.get('/', (c) => {
   const d = new Date(`${dateStr}T12:00:00`);
   const weekStart = new Date(d);
   weekStart.setDate(d.getDate() - d.getDay());
-  const weekStartStr = weekStart.toISOString().slice(0, 10);
+  const weekStartStr = localDateStr(weekStart);
   const monthStartStr = `${dateStr.slice(0, 7)}-01`;
 
   const members = db
@@ -126,6 +128,7 @@ choresRouter.post('/', async (c) => {
   );
 
   broadcastInvalidate(['chores']);
+  scheduleKeepSync();
   const created = db.prepare('SELECT * FROM chores WHERE id = ?').get(id) as Record<
     string,
     unknown
@@ -166,6 +169,7 @@ choresRouter.put('/:id', async (c) => {
   );
 
   broadcastInvalidate(['chores']);
+  scheduleKeepSync();
   const updated = db.prepare('SELECT * FROM chores WHERE id = ?').get(id) as Record<
     string,
     unknown
@@ -176,7 +180,7 @@ choresRouter.put('/:id', async (c) => {
 choresRouter.post('/:id/toggle', async (c) => {
   const choreId = c.req.param('id');
   const body = await c.req.json<{ dateStr: string; completedByMemberId?: string }>();
-  const dateStr = body.dateStr || new Date().toISOString().slice(0, 10);
+  const dateStr = body.dateStr || localDateStr();
 
   const chore = db.prepare('SELECT * FROM chores WHERE id = ?').get(choreId) as
     | Record<string, unknown>
@@ -190,6 +194,7 @@ choresRouter.post('/:id/toggle', async (c) => {
   if (existing) {
     db.prepare('DELETE FROM chore_completions WHERE id = ?').run(existing.id);
     broadcastInvalidate(['chores']);
+  scheduleKeepSync();
     return c.json({ completed: false });
   }
 
@@ -214,6 +219,7 @@ choresRouter.post('/:id/toggle', async (c) => {
   );
 
   broadcastInvalidate(['chores']);
+  scheduleKeepSync();
   return c.json({ completed: true });
 });
 
@@ -221,5 +227,6 @@ choresRouter.delete('/:id', (c) => {
   const id = c.req.param('id');
   db.prepare('DELETE FROM chores WHERE id = ?').run(id);
   broadcastInvalidate(['chores']);
+  scheduleKeepSync();
   return c.json({ ok: true });
 });

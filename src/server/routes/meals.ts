@@ -5,9 +5,18 @@ import { broadcastInvalidate } from '../sse.js';
 import {
   extractRecipeFromUrl,
   importMealsSeedJson,
+  cacheRecipeImages,
+  cacheRemoteImageLocally,
   searchOrGenerateMealsWithGemini,
 } from '../services/recipes.js';
 import { classifyGroceryItem } from '../../shared/groceryClassifier.js';
+import { normalizeNutrition } from '../../shared/nutrition.js';
+import { rememberedAisle } from '../services/aisles.js';
+
+function saveNutrition(recipeId: string, raw: unknown): void {
+  const n = normalizeNutrition(raw);
+  if (n) db.prepare('UPDATE recipes SET nutrition_json = ? WHERE id = ?').run(JSON.stringify(n), recipeId);
+}
 import {
   aggregateIngredients,
   normalizeIngredientName,
@@ -32,6 +41,13 @@ function mapRecipeRow(row: Record<string, unknown>): Recipe {
     instructions: JSON.parse(String(row.instructions_json || '[]')),
     favorite: Boolean(row.favorite),
     createdAt: String(row.created_at),
+    nutrition: (() => {
+      try {
+        return row.nutrition_json ? normalizeNutrition(JSON.parse(String(row.nutrition_json))) : null;
+      } catch {
+        return null;
+      }
+    })(),
   };
 }
 
@@ -56,6 +72,11 @@ mealsRouter.post('/recipes', async (c) => {
   const body = await c.req.json<Partial<Recipe>>();
   const id = crypto.randomUUID();
   const nowIso = new Date().toISOString();
+  // Recipes saved from meal search carry the site's photo link: keep a local copy (works offline, never expires).
+  const imageUrl =
+    typeof body.imageUrl === 'string' && body.imageUrl.startsWith('http')
+      ? await cacheRemoteImageLocally(body.imageUrl)
+      : body.imageUrl || null;
 
   db.prepare(
     `INSERT INTO recipes (
@@ -66,7 +87,7 @@ mealsRouter.post('/recipes', async (c) => {
     id,
     (body.title || 'Untitled Recipe').trim(),
     body.description || '',
-    body.imageUrl || null,
+    imageUrl,
     body.sourceUrl || null,
     body.prepMinutes ?? null,
     body.cookMinutes ?? null,
@@ -77,6 +98,7 @@ mealsRouter.post('/recipes', async (c) => {
     body.favorite ? 1 : 0,
     nowIso
   );
+  saveNutrition(id, body.nutrition);
 
   broadcastInvalidate(['recipes']);
   const created = db.prepare('SELECT * FROM recipes WHERE id = ?').get(id) as Record<
@@ -156,6 +178,7 @@ mealsRouter.post('/recipes/import-url', async (c) => {
       JSON.stringify(extracted.instructions),
       nowIso
     );
+    saveNutrition(id, extracted.nutrition);
     broadcastInvalidate(['recipes']);
     const created = db.prepare('SELECT * FROM recipes WHERE id = ?').get(id) as Record<
       string,
@@ -189,7 +212,9 @@ mealsRouter.post('/recipes/import-json', async (c) => {
     const payload = await c.req.json();
     const result = importMealsSeedJson(payload);
     broadcastInvalidate(['recipes']);
-    return c.json(result);
+    // Save photos locally (like URL import) so they keep working offline and never expire.
+    const imagesCached = await cacheRecipeImages(result.imageIds);
+    return c.json({ ...result, imagesCached });
   } catch (err) {
     return c.json(
       { error: err instanceof Error ? err.message : 'Invalid JSON payload' },
@@ -359,7 +384,7 @@ mealsRouter.post('/send-to-groceries', async (c) => {
           listId,
           agg.name,
           agg.quantity,
-          agg.category,
+          rememberedAisle(agg.name) ?? agg.category,
           sources,
           nowIso
         );

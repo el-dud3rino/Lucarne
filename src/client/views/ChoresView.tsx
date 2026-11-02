@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '../lib/api.js';
 import { addDays, toDateStr } from '../lib/dates.js';
+import { choreAppliesToDate } from '../../shared/chores.js';
 
 const TIME_OF_DAY_ORDER: Record<ChoreTimeOfDay, number> = {
   morning: 0,
@@ -47,20 +48,6 @@ const TIME_LABELS: Record<ChoreTimeOfDay, string> = {
   evening: '🌙 Evening',
   anytime: '✨ Anytime',
 };
-
-function choreAppliesToDate(chore: Chore, d: Date, dateStr: string): boolean {
-  const dow = d.getDay();
-  if (chore.frequency === 'daily') return true;
-  if (chore.frequency === 'weekdays') return dow >= 1 && dow <= 5;
-  if (chore.frequency === 'weekends') return dow === 0 || dow === 6;
-  if (chore.frequency === 'weekly') {
-    return chore.daysOfWeek.length === 0 || chore.daysOfWeek.includes(dow);
-  }
-  if (chore.frequency === 'once') {
-    return !chore.specificDate || chore.specificDate === dateStr;
-  }
-  return true;
-}
 
 export const ChoresView: React.FC<ChoresViewProps> = ({ members, selectedMemberIds }) => {
   const queryClient = useQueryClient();

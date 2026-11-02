@@ -38,6 +38,7 @@ export const FALLBACK_PHOTOS: PhotoItem[] = [
     orientation: 'landscape',
     caption: 'Lucarne Ambient Sanctuary',
     source: 'starter',
+    albumId: null,
     createdAt: new Date().toISOString(),
   },
   {
@@ -46,6 +47,7 @@ export const FALLBACK_PHOTOS: PhotoItem[] = [
     orientation: 'portrait',
     caption: 'Family Moments',
     source: 'starter',
+    albumId: null,
     createdAt: new Date().toISOString(),
   },
   {
@@ -54,9 +56,25 @@ export const FALLBACK_PHOTOS: PhotoItem[] = [
     orientation: 'portrait',
     caption: 'Nature Sanctuary',
     source: 'starter',
+    albumId: null,
     createdAt: new Date().toISOString(),
   },
 ];
+
+/** Deterministic Fisher-Yates shuffle for a given seed (stable across re-renders). */
+export function shufflePhotos(photos: PhotoItem[], seed: number): PhotoItem[] {
+  const out = [...photos];
+  let state = Math.floor(seed * 2 ** 31) || 1;
+  const rand = () => {
+    state = (state * 1103515245 + 12345) & 0x7fffffff;
+    return state / 0x7fffffff;
+  };
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
 
 export function pairPhotos(photos: PhotoItem[]): Array<PhotoItem[]> {
   if (!photos || photos.length === 0) return [];
@@ -119,7 +137,12 @@ export const ScreensaverOverlay: React.FC<ScreensaverProps> = ({
     enabled: active,
   });
 
-  const slides = useMemo(() => pairPhotos(photos), [photos]);
+  // Fresh random order each time the screensaver starts, so large albums don't repeat the same sequence.
+  const [shuffleSeed, setShuffleSeed] = useState(() => Math.random());
+  useEffect(() => {
+    if (active) setShuffleSeed(Math.random());
+  }, [active]);
+  const slides = useMemo(() => pairPhotos(shufflePhotos(photos, shuffleSeed)), [photos, shuffleSeed]);
 
   // Synchronize slide layers when slides change
   useEffect(() => {

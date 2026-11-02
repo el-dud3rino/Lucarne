@@ -129,7 +129,7 @@ test('Touch Keyboard: Kiosk 1080p Virtual Keyboard & Mobile Suppression', async 
     // 2. MODAL AUTO-SCROLL & NON-OBSCURING CHECK (1920x1080)
     // ---------------------------------------------------------
     await kioskPage.locator('aside button', { hasText: 'Calendar' }).click();
-    await kioskPage.waitForSelector('text=4-Day');
+    await kioskPage.waitForSelector('text=5-Day');
     await kioskPage.locator('button:has-text("Add Event")').click();
     await kioskPage.waitForSelector('text=Add Family Event');
 

@@ -19,6 +19,8 @@ import { apiFetch } from '../lib/api.js';
 import { addDays, startOfWeek, toDateStr } from '../lib/dates.js';
 import { aggregateIngredients } from '../../shared/ingredientAggregator.js';
 import { CookModeView } from './CookModeView.js';
+import { RecipePreviewModal } from '../components/RecipePreviewModal.js';
+import { formatMinutes } from '../lib/time.js';
 import type {
   AppSettings,
   MealPlanEntry,
@@ -625,7 +627,11 @@ const ImportRecipeModal: React.FC<{
   const [mode, setMode] = useState<'url' | 'ai' | 'json'>('url');
   const [url, setUrl] = useState('');
   const [aiQuery, setAiQuery] = useState('');
-  const [aiResults, setAiResults] = useState<Array<Omit<Recipe, 'id' | 'createdAt'>>>([]);
+  const [aiResults, setAiResults] = useState<
+    Array<Omit<Recipe, 'id' | 'createdAt'> & { site?: string; alreadySaved?: boolean }>
+  >([]);
+  const [previewIdx, setPreviewIdx] = useState<number | null>(null);
+  const [savingPreview, setSavingPreview] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -778,6 +784,10 @@ const ImportRecipeModal: React.FC<{
                 Tip: Add your Gemini API Key in Settings first to enable AI Meal Discovery.
               </div>
             )}
+            <p className="text-sm text-stone-500">
+              Gemini finds real recipe pages; Lucarne opens each one and only shows recipes it can
+              actually read, with the site's own photo, ingredients and nutrition. Nothing is made up.
+            </p>
             <form onSubmit={handleAiSearch} className="flex gap-2">
               <input
                 type="text"
@@ -799,18 +809,43 @@ const ImportRecipeModal: React.FC<{
               {aiResults.map((r, i) => (
                 <div
                   key={i}
-                  className="p-3.5 rounded-2xl border border-stone-200 bg-stone-50 flex items-center justify-between gap-3"
+                  className="p-3 rounded-2xl border border-stone-200 bg-stone-50 flex items-center justify-between gap-3"
                 >
-                  <div>
-                    <div className="font-extrabold text-slate-800">{r.title}</div>
-                    <div className="text-xs text-stone-500 mt-0.5">{r.description}</div>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewIdx(i)}
+                    className="flex items-center gap-3 text-left min-w-0 flex-1 min-h-[40px] rounded-xl hover:bg-white/70 transition -m-1 p-1"
+                    aria-label={`Preview ${r.title}`}
+                  >
+                    <span className="w-14 h-14 shrink-0 rounded-xl overflow-hidden bg-gradient-to-br from-amber-100 to-rose-100 flex items-center justify-center text-2xl" aria-hidden>
+                      {r.imageUrl ? (
+                        <img src={r.imageUrl} alt="" loading="lazy" className="w-full h-full object-cover" />
+                      ) : (
+                        r.emoji || '🍽️'
+                      )}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block font-extrabold text-slate-800 truncate">{r.title}</span>
+                      <span className="block text-xs text-stone-500 truncate">{r.description}</span>
+                      <span className="flex flex-wrap gap-x-3 text-[11px] font-bold text-stone-500 mt-0.5">
+                        {r.nutrition?.calories != null && <span>🔥 {r.nutrition.calories} kcal</span>}
+                        {(r.prepMinutes ?? 0) + (r.cookMinutes ?? 0) > 0 && (
+                          <span>⏱ {formatMinutes((r.prepMinutes ?? 0) + (r.cookMinutes ?? 0))}</span>
+                        )}
+                        {r.servings ? <span>👥 serves {r.servings}</span> : null}
+                        {r.site && <span className="text-stone-400 font-semibold">{r.site}</span>}
+                        {r.alreadySaved && <span className="text-emerald-600">✓ saved</span>}
+                        <span className="text-sky-600">Tap for details</span>
+                      </span>
+                    </span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => saveAiResult(r)}
-                    className="h-10 min-h-[40px] px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold text-xs shrink-0 flex items-center justify-center"
+                    disabled={r.alreadySaved}
+                    className="h-10 min-h-[40px] px-4 py-2 rounded-xl bg-emerald-600 disabled:bg-stone-300 text-white font-bold text-xs shrink-0 flex items-center justify-center"
                   >
-                    Save Recipe
+                    {r.alreadySaved ? 'Saved' : 'Save Recipe'}
                   </button>
                 </div>
               ))}
@@ -818,11 +853,43 @@ const ImportRecipeModal: React.FC<{
           </div>
         )}
 
+        {previewIdx !== null && aiResults[previewIdx] && (
+          <RecipePreviewModal
+            recipe={aiResults[previewIdx]}
+            saving={savingPreview}
+            onClose={() => setPreviewIdx(null)}
+            onSave={async () => {
+              setSavingPreview(true);
+              try {
+                await saveAiResult(aiResults[previewIdx]);
+                setPreviewIdx(null);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : 'Could not save recipe');
+              } finally {
+                setSavingPreview(false);
+              }
+            }}
+          />
+        )}
+
         {mode === 'json' && (
           <div className="space-y-3">
             <p className="text-sm text-stone-500">
               Upload your JSON meals seed file. Supports arrays or objects (`meals` / `recipes`)
-              and automatically normalizes ingredients into grocery aisles.
+              and automatically normalizes ingredients into grocery aisles. Recipes already in your
+              library are skipped.
+            </p>
+            <p className="text-xs text-stone-400">
+              Format and example:{' '}
+              <a
+                href="https://github.com/el-dud3rino/Lucarne/blob/main/examples/meals.sample.json"
+                target="_blank"
+                rel="noreferrer"
+                className="underline font-semibold text-sky-600"
+              >
+                examples/meals.sample.json
+              </a>{' '}
+              (field reference in the README).
             </p>
             <label className="block border-2 border-dashed border-stone-300 hover:border-sky-500 rounded-2xl p-8 text-center cursor-pointer bg-stone-50 transition">
               <input

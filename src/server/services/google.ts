@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { db, MEDIA_PHOTOS_DIR, runTransaction } from '../db/connection.js';
 import { broadcastInvalidate } from '../sse.js';
+import { describeGoogleError, googleApiError } from './googleErrors.js';
+import { categoryForCalendar, categoryForEvent, isEventCategory } from '../../shared/eventCategories.js';
 
 export function getGoogleOAuthBaseUrl(): string {
   return (process.env.GOOGLE_OAUTH_BASE_URL || 'https://oauth2.googleapis.com').replace(/\/+$/, '');
@@ -51,6 +53,39 @@ export function getGoogleOAuthConfig(originFallback?: string) {
   return { clientId, clientSecret, redirectUri };
 }
 
+/**
+ * All-day date conventions:
+ * - Google: `end.date` is EXCLUSIVE (a one-day event on Nov 2 has end.date = Nov 3).
+ * - Lucarne: endIso is the INCLUSIVE last day at T23:59:59.000Z (compared by date string).
+ */
+function shiftDateStr(dateStr: string, days: number): string {
+  const d = new Date(`${dateStr}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+export function googleAllDayToLocal(
+  startDate: string,
+  endDateExclusive?: string
+): { startIso: string; endIso: string } {
+  let lastDay = startDate;
+  if (endDateExclusive) {
+    const inclusive = shiftDateStr(endDateExclusive, -1);
+    if (inclusive > startDate) lastDay = inclusive;
+  }
+  return { startIso: `${startDate}T00:00:00.000Z`, endIso: `${lastDay}T23:59:59.000Z` };
+}
+
+export function localAllDayToGoogle(
+  startIso: string,
+  endIso: string
+): { start: { date: string }; end: { date: string } } {
+  const startDate = startIso.slice(0, 10);
+  let lastDay = endIso.slice(0, 10);
+  if (lastDay < startDate) lastDay = startDate;
+  return { start: { date: startDate }, end: { date: shiftDateStr(lastDay, 1) } };
+}
+
 const SCOPES = [
   'openid',
   'email',
@@ -90,7 +125,7 @@ export async function exchangeCodeAndSaveAccount(code: string, origin: string): 
   });
   if (!tokenRes.ok) {
     const errTxt = await tokenRes.text();
-    throw new Error(`OAuth token exchange failed: ${errTxt}`);
+    throw new Error(describeGoogleError('Google sign-in', tokenRes.status, errTxt));
   }
   const tokens = (await tokenRes.json()) as {
     access_token: string;
@@ -177,7 +212,7 @@ async function getValidAccessToken(accountId: string): Promise<string> {
     }),
   });
   if (!res.ok) {
-    throw new Error(`Token refresh failed (${res.status})`);
+    throw await googleApiError('Google sign-in refresh', res);
   }
   const data = (await res.json()) as { access_token: string; expires_in: number };
   const expiry = Date.now() + (data.expires_in - 60) * 1000;
@@ -194,18 +229,14 @@ export async function discoverAccountCalendars(accountId: string): Promise<void>
   const res = await fetch(`${getGoogleApiBaseUrl()}/calendar/v3/users/me/calendarList`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) throw new Error(`Failed to list calendars (${res.status})`);
+  if (!res.ok) throw await googleApiError('Google Calendar API', res);
   const data = (await res.json()) as {
     items?: Array<{ id: string; summary: string; accessRole: string; primary?: boolean }>;
   };
 
-  const defaultMember = db
-    .prepare('SELECT id FROM family_members ORDER BY sort_order ASC LIMIT 1')
-    .get() as { id: string } | undefined;
-
   const upsert = db.prepare(`
-    INSERT INTO calendar_sources (id, google_account_id, external_calendar_id, name, member_id, enabled, is_writable)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO calendar_sources (id, google_account_id, external_calendar_id, name, member_id, enabled, is_writable, category)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(google_account_id, external_calendar_id) DO UPDATE SET
       name = excluded.name,
       is_writable = excluded.is_writable
@@ -218,9 +249,10 @@ export async function discoverAccountCalendars(accountId: string): Promise<void>
       accountId,
       cal.id,
       cal.summary || cal.id,
-      defaultMember?.id || null,
+      null, // new calendars start unassigned; mapped to people in Settings
       cal.primary ? 1 : 0,
-      writable
+      writable,
+      categoryForCalendar(cal.id, cal.summary || cal.id) // holiday/birthday calendars are tagged automatically
     );
   }
 }
@@ -305,7 +337,7 @@ export async function flushOutboxMutations(force = false): Promise<void> {
 
           // 404 and 410 indicate event was already deleted on remote
           if (!res.ok && res.status !== 404 && res.status !== 410) {
-            throw new Error(`Google Calendar delete failed (${res.status})`);
+            throw await googleApiError('Google Calendar API', res);
           }
         } else if (item.action === 'upsert') {
           // If event was created offline and subsequently deleted before syncing, discard mutation
@@ -332,12 +364,9 @@ export async function flushOutboxMutations(force = false): Promise<void> {
             summary: payload.title,
             description: payload.description,
             location: payload.location,
-            start: payload.allDay
-              ? { date: payload.startIso.slice(0, 10) }
-              : { dateTime: payload.startIso },
-            end: payload.allDay
-              ? { date: payload.endIso.slice(0, 10) }
-              : { dateTime: payload.endIso },
+            ...(payload.allDay
+              ? localAllDayToGoogle(payload.startIso, payload.endIso)
+              : { start: { dateTime: payload.startIso }, end: { dateTime: payload.endIso } }),
           };
 
           const url = targetExternalId
@@ -361,7 +390,7 @@ export async function flushOutboxMutations(force = false): Promise<void> {
               item.entity_id
             );
           } else {
-            throw new Error(`Google Calendar write failed (${res.status})`);
+            throw await googleApiError('Google Calendar API', res);
           }
         }
       }
@@ -380,20 +409,45 @@ export async function flushOutboxMutations(force = false): Promise<void> {
   }
 }
 
-export async function syncAllEnabledCalendars(force = false): Promise<void> {
+/** People a calendar's events belong to (multi-select; falls back to the legacy single member_id). */
+export function sourceMemberIds(src: { member_ids_json?: string | null; member_id?: string | null }): string[] {
+  try {
+    const ids = JSON.parse(src.member_ids_json || '[]');
+    if (Array.isArray(ids) && ids.length > 0) return ids.map(String);
+  } catch {
+    // fall through
+  }
+  return src.member_id ? [src.member_id] : [];
+}
+
+export interface CalendarSyncSummary {
+  synced: number;
+  failed: Array<{ calendar: string; account: string; message: string }>;
+}
+
+export async function syncAllEnabledCalendars(force = false): Promise<CalendarSyncSummary> {
   await flushOutboxMutations(force);
 
   const sources = db
-    .prepare('SELECT * FROM calendar_sources WHERE enabled = 1')
+    .prepare(
+      `SELECT cs.*, ga.email AS account_email FROM calendar_sources cs
+       JOIN google_accounts ga ON ga.id = cs.google_account_id
+       WHERE cs.enabled = 1`
+    )
     .all() as Array<{
     id: string;
+    name: string;
+    account_email: string;
     google_account_id: string;
     external_calendar_id: string;
     member_id: string | null;
+    member_ids_json: string | null;
+    category: string | null;
     sync_token: string | null;
   }>;
 
-  if (sources.length === 0) return;
+  const summary: CalendarSyncSummary = { synced: 0, failed: [] };
+  if (sources.length === 0) return summary;
   let anyChanged = false;
 
   for (const src of sources) {
@@ -427,7 +481,7 @@ export async function syncAllEnabledCalendars(force = false): Promise<void> {
         );
       }
 
-      if (!res.ok) throw new Error(`Calendar sync HTTP ${res.status}`);
+      if (!res.ok) throw await googleApiError('Google Calendar API', res);
 
       const data = (await res.json()) as {
         nextSyncToken?: string;
@@ -435,6 +489,7 @@ export async function syncAllEnabledCalendars(force = false): Promise<void> {
           id: string;
           status: string;
           summary?: string;
+          eventType?: string;
           description?: string;
           location?: string;
           start?: { dateTime?: string; date?: string };
@@ -460,17 +515,24 @@ export async function syncAllEnabledCalendars(force = false): Promise<void> {
           }
 
           const allDay = Boolean(gEv.start?.date && !gEv.start?.dateTime);
-          const startIso =
-            gEv.start?.dateTime ||
-            (gEv.start?.date ? `${gEv.start.date}T00:00:00.000Z` : nowIso);
-          const endIso =
-            gEv.end?.dateTime ||
-            (gEv.end?.date ? `${gEv.end.date}T23:59:59.000Z` : startIso);
-          const memberIds = src.member_id ? [src.member_id] : [];
+          let startIso: string;
+          let endIso: string;
+          if (allDay && gEv.start?.date) {
+            ({ startIso, endIso } = googleAllDayToLocal(gEv.start.date, gEv.end?.date));
+          } else {
+            startIso = gEv.start?.dateTime || nowIso;
+            endIso = gEv.end?.dateTime || startIso;
+          }
+          const memberIds = sourceMemberIds(src);
+          const category = categoryForEvent(
+            isEventCategory(src.category) ? src.category : null,
+            gEv.summary || '',
+            gEv.eventType
+          );
 
           if (existing) {
             db.prepare(
-              `UPDATE events SET title = ?, description = ?, location = ?, start_iso = ?, end_iso = ?, all_day = ?, member_ids_json = ?, updated_at = ?
+              `UPDATE events SET title = ?, description = ?, location = ?, start_iso = ?, end_iso = ?, all_day = ?, member_ids_json = ?, category = ?, updated_at = ?
                WHERE id = ?`
             ).run(
               gEv.summary || '(Untitled)',
@@ -480,13 +542,14 @@ export async function syncAllEnabledCalendars(force = false): Promise<void> {
               endIso,
               allDay ? 1 : 0,
               JSON.stringify(memberIds),
+              category,
               nowIso,
               existing.id
             );
           } else {
             db.prepare(
-              `INSERT INTO events (id, title, description, location, start_iso, end_iso, all_day, member_ids_json, calendar_source_id, external_event_id, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              `INSERT INTO events (id, title, description, location, start_iso, end_iso, all_day, member_ids_json, calendar_source_id, external_event_id, category, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             ).run(
               crypto.randomUUID(),
               gEv.summary || '(Untitled)',
@@ -498,6 +561,7 @@ export async function syncAllEnabledCalendars(force = false): Promise<void> {
               JSON.stringify(memberIds),
               src.id,
               gEv.id,
+              category,
               nowIso
             );
           }
@@ -505,22 +569,38 @@ export async function syncAllEnabledCalendars(force = false): Promise<void> {
         }
 
         db.prepare(
-          'UPDATE calendar_sources SET sync_token = ?, last_synced_at = ? WHERE id = ?'
+          'UPDATE calendar_sources SET sync_token = ?, last_synced_at = ?, sync_error = NULL WHERE id = ?'
         ).run(data.nextSyncToken || src.sync_token, nowIso, src.id);
-        db.prepare(
-          "UPDATE google_accounts SET last_synced_at = ?, sync_status = 'ok', sync_error = NULL WHERE id = ?"
-        ).run(nowIso, src.google_account_id);
       });
+      summary.synced += 1;
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      db.prepare('UPDATE calendar_sources SET sync_error = ? WHERE id = ?').run(message, src.id);
+      summary.failed.push({ calendar: src.name, account: src.account_email, message });
+    }
+  }
+
+  // Account status reflects ALL of its calendars (one success must not hide another's failure).
+  const finishedAt = new Date().toISOString();
+  for (const accountId of new Set(sources.map((s) => s.google_account_id))) {
+    const email = sources.find((s) => s.google_account_id === accountId)!.account_email;
+    const failures = summary.failed.filter((f) => f.account === email);
+    if (failures.length === 0) {
       db.prepare(
-        "UPDATE google_accounts SET sync_status = 'error', sync_error = ? WHERE id = ?"
-      ).run(err instanceof Error ? err.message : String(err), src.google_account_id);
+        "UPDATE google_accounts SET last_synced_at = ?, sync_status = 'ok', sync_error = NULL WHERE id = ?"
+      ).run(finishedAt, accountId);
+    } else {
+      db.prepare("UPDATE google_accounts SET sync_status = 'error', sync_error = ? WHERE id = ?").run(
+        failures.map((f) => `${f.calendar}: ${f.message}`).join(' · '),
+        accountId
+      );
     }
   }
 
   if (anyChanged) {
     broadcastInvalidate(['events']);
   }
+  return summary;
 }
 
 /**
@@ -539,87 +619,125 @@ export async function createPhotosPickerSession(accountId: string): Promise<{
     },
     body: JSON.stringify({}),
   });
-  if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`Photos Picker API error (${res.status}): ${txt}`);
-  }
+  if (!res.ok) throw await googleApiError('Google Photos Picker API', res);
   const data = (await res.json()) as { id: string; pickerUri: string };
   return { sessionId: data.id, pickerUri: data.pickerUri };
 }
 
+export interface PickerPollResult {
+  ready: boolean;
+  importedCount: number;
+  alreadyHadCount: number;
+  skippedVideoCount: number;
+  failedCount: number;
+  /** Suggested wait before polling again (from Google's pollingConfig). */
+  pollIntervalMs?: number;
+}
+
+/**
+ * Checks a Photos Picker session; once the user finishes picking, downloads every selected photo
+ * (all pages, so whole albums work) as 1920x1080 JPEGs to local storage.
+ */
 export async function pollAndImportPhotosPickerSession(
   accountId: string,
   sessionId: string
-): Promise<{ ready: boolean; importedCount: number }> {
+): Promise<PickerPollResult> {
   const token = await getValidAccessToken(accountId);
-  const sRes = await fetch(
-    `${getGooglePhotosPickerBaseUrl()}/v1/sessions/${encodeURIComponent(sessionId)}`,
-    { headers: { Authorization: `Bearer ${token}` } }
-  );
-  if (!sRes.ok) throw new Error(`Failed to check picker session (${sRes.status})`);
-  const session = (await sRes.json()) as { mediaItemsSet?: boolean };
-  if (!session.mediaItemsSet) {
-    return { ready: false, importedCount: 0 };
-  }
-
-  const mRes = await fetch(
-    `${getGooglePhotosPickerBaseUrl()}/v1/mediaItems?sessionId=${encodeURIComponent(
-      sessionId
-    )}&pageSize=100`,
-    { headers: { Authorization: `Bearer ${token}` } }
-  );
-  if (!mRes.ok) throw new Error(`Failed to list picked photos (${mRes.status})`);
-  const mediaData = (await mRes.json()) as {
-    mediaItems?: Array<{
-      id: string;
-      mediaFile?: {
-        baseUrl: string;
-        mediaFileMetadata?: { width?: number; height?: number };
-      };
-    }>;
+  const base = getGooglePhotosPickerBaseUrl();
+  const sRes = await fetch(`${base}/v1/sessions/${encodeURIComponent(sessionId)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!sRes.ok) throw await googleApiError('Google Photos Picker API', sRes);
+  const session = (await sRes.json()) as {
+    mediaItemsSet?: boolean;
+    pollingConfig?: { pollInterval?: string };
   };
+  const result: PickerPollResult = {
+    ready: false,
+    importedCount: 0,
+    alreadyHadCount: 0,
+    skippedVideoCount: 0,
+    failedCount: 0,
+  };
+  if (!session.mediaItemsSet) {
+    const secs = parseFloat(session.pollingConfig?.pollInterval || '');
+    if (Number.isFinite(secs) && secs > 0) result.pollIntervalMs = Math.round(secs * 1000);
+    return result;
+  }
+  result.ready = true;
 
-  let imported = 0;
+  type PickedItem = {
+    id: string;
+    type?: string;
+    mediaFile?: { baseUrl: string; mimeType?: string; mediaFileMetadata?: { width?: number; height?: number } };
+  };
+  const items: PickedItem[] = [];
+  let pageToken = '';
+  do {
+    const params = new URLSearchParams({ sessionId, pageSize: '100' });
+    if (pageToken) params.set('pageToken', pageToken);
+    const mRes = await fetch(`${base}/v1/mediaItems?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!mRes.ok) throw await googleApiError('Google Photos Picker API', mRes);
+    const page = (await mRes.json()) as { mediaItems?: PickedItem[]; nextPageToken?: string };
+    items.push(...(page.mediaItems || []));
+    pageToken = page.nextPageToken || '';
+  } while (pageToken);
+
   const nowIso = new Date().toISOString();
   const insertStmt = db.prepare(`
     INSERT INTO photos (id, url, orientation, caption, source, external_id, created_at)
     VALUES (?, ?, ?, '', 'google_photos', ?, ?)
   `);
 
-  for (const item of mediaData.mediaItems || []) {
+  for (const item of items) {
     const baseUrl = item.mediaFile?.baseUrl;
-    if (!baseUrl) continue;
+    const isVideo = item.type === 'VIDEO' || (item.mediaFile?.mimeType || '').startsWith('video/');
+    if (isVideo) {
+      result.skippedVideoCount++;
+      continue;
+    }
+    if (!baseUrl) {
+      result.failedCount++;
+      continue;
+    }
+    if (db.prepare('SELECT 1 FROM photos WHERE external_id = ?').get(item.id)) {
+      result.alreadyHadCount++;
+      continue;
+    }
 
-    const already = db
-      .prepare('SELECT id FROM photos WHERE external_id = ?')
-      .get(item.id) as { id: string } | undefined;
-    if (already) continue;
-
-    // Download 1920x1080 version directly to local SSD so URLs never expire
+    // Download a 1920x1080 version to local storage so URLs never expire
     const itemDownloadUrl = baseUrl.startsWith('http')
       ? `${baseUrl}=w1920-h1080`
-      : `${getGooglePhotosPickerBaseUrl()}${baseUrl.startsWith('/') ? '' : '/'}${baseUrl}=w1920-h1080`;
+      : `${base}${baseUrl.startsWith('/') ? '' : '/'}${baseUrl}=w1920-h1080`;
+    try {
+      const dlRes = await fetch(itemDownloadUrl, { headers: { Authorization: `Bearer ${token}` } });
+      if (!dlRes.ok) {
+        result.failedCount++;
+        continue;
+      }
+      const buf = Buffer.from(await dlRes.arrayBuffer());
+      const filename = `${crypto.randomUUID()}.jpg`;
+      fs.writeFileSync(path.join(MEDIA_PHOTOS_DIR, filename), buf);
 
-    const dlRes = await fetch(itemDownloadUrl, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!dlRes.ok) continue;
-    const buf = Buffer.from(await dlRes.arrayBuffer());
-    const filename = `${crypto.randomUUID()}.jpg`;
-    fs.writeFileSync(path.join(MEDIA_PHOTOS_DIR, filename), buf);
-
-    const w = item.mediaFile?.mediaFileMetadata?.width || 1920;
-    const h = item.mediaFile?.mediaFileMetadata?.height || 1080;
-    const orientation = h > w ? 'portrait' : 'landscape';
-
-    insertStmt.run(crypto.randomUUID(), `/media/photos/${filename}`, orientation, item.id, nowIso);
-    imported++;
+      const w = item.mediaFile?.mediaFileMetadata?.width || 1920;
+      const h = item.mediaFile?.mediaFileMetadata?.height || 1080;
+      insertStmt.run(crypto.randomUUID(), `/media/photos/${filename}`, h > w ? 'portrait' : 'landscape', item.id, nowIso);
+      result.importedCount++;
+    } catch {
+      result.failedCount++;
+    }
   }
 
-  if (imported > 0) {
-    broadcastInvalidate(['photos']);
-  }
-  return { ready: true, importedCount: imported };
+  // Google asks apps to delete finished sessions; best effort.
+  fetch(`${base}/v1/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  }).catch(() => {});
+
+  if (result.importedCount > 0) broadcastInvalidate(['photos']);
+  return result;
 }
 
 export async function revokeGoogleToken(token: string): Promise<void> {

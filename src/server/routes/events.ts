@@ -5,6 +5,7 @@ import { broadcastInvalidate } from '../sse.js';
 import { flushOutboxMutations } from '../services/google.js';
 import { expandRecurringEvent } from '../services/recurrence.js';
 import type { CalendarEvent, EventRecurrenceRule } from '../../shared/types.js';
+import { isEventCategory } from '../../shared/eventCategories.js';
 
 export const eventsRouter = new Hono();
 
@@ -37,7 +38,20 @@ function mapEventRow(row: Record<string, unknown>): CalendarEvent {
     updatedAt: String(row.updated_at),
     recurrenceRule: (row.recurrence_rule as EventRecurrenceRule) || null,
     exceptionDates,
+    category: isEventCategory(row.category) ? row.category : null,
   };
+}
+
+/** The same birthday often comes from two calendars (e.g. Family + Birthdays); show it once per day. */
+export function dedupeBirthdays(events: CalendarEvent[]): CalendarEvent[] {
+  const seen = new Set<string>();
+  return events.filter((ev) => {
+    if (ev.category !== 'birthday') return true;
+    const key = `${ev.title.trim().toLowerCase()}|${ev.startIso.slice(0, 10)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 eventsRouter.get('/', (c) => {
@@ -76,7 +90,7 @@ eventsRouter.get('/', (c) => {
       return a.startIso.localeCompare(b.startIso);
     });
 
-    return c.json(resultList);
+    return c.json(dedupeBirthdays(resultList));
   }
 
   const rows = db

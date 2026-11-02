@@ -2,7 +2,10 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import * as cheerio from 'cheerio';
-import { GoogleGenAI, Type } from '@google/genai';
+import { broadcastInvalidate } from '../sse.js';
+import { normalizeNutrition } from '../../shared/nutrition.js';
+import { classifyQuotaError, GeminiUsage, nextPacificMidnight, type UsageSnapshot } from './geminiQuota.js';
+import { GoogleGenAI, Type, type GenerateContentParameters } from '@google/genai';
 import { db, MEDIA_RECIPES_DIR, runTransaction } from '../db/connection.js';
 import { classifyGroceryItem } from '../../shared/groceryClassifier.js';
 import { parseFractionNumber } from '../../shared/ingredientAggregator.js';
@@ -12,6 +15,383 @@ import {
   type Recipe,
   type RecipeIngredient,
 } from '../../shared/types.js';
+
+// ---- Gemini model selection ----
+// Google retires model versions regularly (gemini-2.5-flash was retired for new users in 2026), so
+// instead of hard-coding one, use GEMINI_MODEL if set, else the newest stable "gemini-<ver>-flash".
+const FALLBACK_GEMINI_MODEL = 'gemini-flash-latest';
+const FALLBACK_LITE_MODEL = 'gemini-flash-lite-latest';
+const MAX_MODELS_TO_TRY = 5;
+const BUSY_COOLDOWN_MS = 10 * 60_000; // overloaded / timed out: try it last for a while
+const MINUTE_QUOTA_BACKOFF_MS = 65_000;
+
+/**
+ * light = short, simple jobs (suggesting recipe links, tidying ingredient lists): Flash-Lite first
+ *         (free tier: 15/min, 500/day).
+ * heavy = reading a whole recipe page: full Flash first (free tier: only 5/min, 20/day).
+ */
+export type GeminiTask = 'light' | 'heavy';
+
+let cachedModelNames: string[] | null = null;
+const retiredGeminiModels = new Set<string>();
+const busyUntil = new Map<string, number>(); // 503 / timeouts: deprioritised
+const quotaBlockedUntil = new Map<string, number>(); // Google said 429: skipped entirely until then
+const lastGoodModel: Record<GeminiTask, string | null> = { light: null, heavy: null };
+
+let usage: GeminiUsage | null = null;
+function geminiUsage(): GeminiUsage {
+  if (!usage) {
+    usage = new GeminiUsage({
+      load: () => {
+        try {
+          const row = db.prepare("SELECT value FROM app_settings WHERE key = 'geminiUsage'").get() as
+            | { value: string }
+            | undefined;
+          return row ? (JSON.parse(row.value) as UsageSnapshot) : null;
+        } catch {
+          return null;
+        }
+      },
+      save: (snap) => {
+        try {
+          db.prepare(
+            "INSERT INTO app_settings (key, value) VALUES ('geminiUsage', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+          ).run(JSON.stringify(snap));
+        } catch {
+          // usage tracking is best effort
+        }
+      },
+    });
+  }
+  return usage;
+}
+
+/** Thrown when every candidate model is out of quota; message says when it resets. */
+export class GeminiQuotaError extends Error {}
+
+function formatResetTime(ms: number): string {
+  return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+/**
+ * Order to try models in: the model that last worked for this kind of task, then healthy models in
+ * preference order, then models still cooling down after being busy. Retired models and models that
+ * are out of quota (blockedUntil in the future) are left out entirely.
+ */
+export function orderGeminiModels(
+  ranked: string[],
+  opts: {
+    lastGood?: string | null;
+    busyUntil?: Map<string, number>;
+    blockedUntil?: (model: string) => number;
+    retired?: Set<string>;
+    now?: number;
+    max?: number;
+  }
+): string[] {
+  const now = opts.now ?? Date.now();
+  const retired = opts.retired ?? new Set<string>();
+  const busy = opts.busyUntil ?? new Map<string, number>();
+  const blocked = opts.blockedUntil ?? (() => 0);
+  const usable = [...new Set(ranked)].filter((m) => !retired.has(m) && blocked(m) <= now);
+  const isBusy = (m: string) => (busy.get(m) ?? 0) > now;
+  const ordered = [...usable.filter((m) => !isBusy(m)), ...usable.filter(isBusy)];
+  if (opts.lastGood && ordered.includes(opts.lastGood) && !isBusy(opts.lastGood)) {
+    ordered.splice(ordered.indexOf(opts.lastGood), 1);
+    ordered.unshift(opts.lastGood);
+  }
+  return ordered.slice(0, opts.max ?? MAX_MODELS_TO_TRY);
+}
+
+function compareVersions(a: number[], b: number[]): number {
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const d = (a[i] ?? 0) - (b[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
+function rankByVersion(names: string[], pattern: RegExp, exclude: Set<string>): string[] {
+  const found = new Map<string, number[]>();
+  for (const raw of names) {
+    const name = raw.replace(/^models\//, '');
+    const m = name.match(pattern);
+    if (!m || exclude.has(name)) continue;
+    found.set(name, m[1].split('.').map(Number));
+  }
+  return [...found.entries()].sort((x, y) => compareVersions(y[1], x[1])).map(([name]) => name);
+}
+
+/** Stable "gemini-<version>-flash" models, newest first (no -lite/-preview/-exp variants). */
+export function rankFlashModels(names: string[], exclude: Set<string> = new Set()): string[] {
+  return rankByVersion(names, /^gemini-(\d+(?:\.\d+)*)-flash$/, exclude);
+}
+
+/** Stable "gemini-<version>-flash-lite" models, newest first. */
+export function rankLiteModels(names: string[], exclude: Set<string> = new Set()): string[] {
+  return rankByVersion(names, /^gemini-(\d+(?:\.\d+)*)-flash-lite$/, exclude);
+}
+
+export function pickNewestFlashModel(names: string[], exclude: Set<string> = new Set()): string | null {
+  return rankFlashModels(names, exclude)[0] ?? null;
+}
+
+function modelBlockedUntil(model: string, now = Date.now()): number {
+  return Math.max(quotaBlockedUntil.get(model) ?? 0, geminiUsage().blockedUntil(model, now));
+}
+
+/** Models to try for a task, in order. Throws GeminiQuotaError if all are out of quota right now. */
+async function resolveGeminiModels(ai: GoogleGenAI, task: GeminiTask = 'heavy'): Promise<string[]> {
+  const pinned = (process.env.GEMINI_MODEL || '').trim();
+  if (pinned) return [pinned];
+  if (!cachedModelNames) {
+    try {
+      const names: string[] = [];
+      const pager = await ai.models.list();
+      for await (const model of pager) {
+        if (model.name && (!model.supportedActions || model.supportedActions.includes('generateContent'))) {
+          names.push(model.name);
+        }
+      }
+      cachedModelNames = names;
+    } catch {
+      cachedModelNames = [];
+    }
+  }
+  const flash = rankFlashModels(cachedModelNames);
+  const lite = rankLiteModels(cachedModelNames);
+  const flashList = flash.length > 0 ? flash : [FALLBACK_GEMINI_MODEL];
+  const liteList = lite.length > 0 ? lite : [FALLBACK_LITE_MODEL];
+  const ranked = task === 'light' ? [...liteList, ...flashList] : [...flashList, ...liteList];
+
+  const now = Date.now();
+  const list = orderGeminiModels(ranked, {
+    lastGood: lastGoodModel[task],
+    busyUntil,
+    blockedUntil: (m) => modelBlockedUntil(m, now),
+    retired: retiredGeminiModels,
+    now,
+  });
+  if (list.length === 0) {
+    const soonest = Math.min(...ranked.filter((m) => !retiredGeminiModels.has(m)).map((m) => modelBlockedUntil(m, now)));
+    const daily = soonest >= nextPacificMidnight(now) - 60_000;
+    throw new GeminiQuotaError(
+      daily
+        ? `Gemini's free daily limit is used up for today. It resets at ${formatResetTime(soonest)} (midnight Pacific).`
+        : `Gemini's free per-minute limit is reached. Try again at ${formatResetTime(soonest)}.`
+    );
+  }
+  return list;
+}
+
+function isModelUnavailable(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /no longer available|is not found|not supported for generateContent|"code":\s*404/i.test(msg);
+}
+
+
+function isTransientGeminiError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /"code":\s*(429|500|503|504)|UNAVAILABLE|RESOURCE_EXHAUSTED|DEADLINE_EXCEEDED|high demand|overloaded|timed? ?out|aborted/i.test(msg);
+}
+
+/** Short, human message for Gemini failures (instead of Google's raw JSON). */
+export function describeGeminiError(err: unknown): string {
+  if (err instanceof GeminiQuotaError) return err.message;
+  const msg = err instanceof Error ? err.message : String(err);
+  const quota = classifyQuotaError(err);
+  if (quota === 'day') {
+    return `Gemini's free daily limit is used up. It resets at ${formatResetTime(nextPacificMidnight(Date.now()))} (midnight Pacific).`;
+  }
+  if (quota === 'minute') return "Gemini's free per-minute limit was reached. Try again in a minute.";
+  if (/high demand|overloaded|UNAVAILABLE|DEADLINE_EXCEEDED|timed? ?out|aborted|"code":\s*(503|504)/i.test(msg)) {
+    return 'Gemini is busy right now (Google reports high demand). Try again in a minute.';
+  }
+  if (/RESOURCE_EXHAUSTED|"code":\s*429|quota/i.test(msg)) {
+    return 'Gemini rate limit or free-tier quota reached. Wait a bit and try again.';
+  }
+  if (/API key not valid|API_KEY_INVALID|PERMISSION_DENIED|"code":\s*(401|403)/i.test(msg)) {
+    return 'Gemini rejected the API key. Check the Gemini key in Settings or GEMINI_API_KEY in .env.';
+  }
+  if (isModelUnavailable(err)) {
+    return 'The Gemini model is no longer available. Remove GEMINI_MODEL from .env to let Lucarne pick the current one.';
+  }
+  const inner = msg.match(/"message":\s*"([^"]+)"/)?.[1];
+  return `Gemini error: ${(inner || msg).slice(0, 200)}`;
+}
+
+const GEMINI_TOTAL_BUDGET_MS = 90_000; // whole request, across retries and model fallbacks
+
+function isTimeoutError(err: unknown): boolean {
+  const msg = err instanceof Error ? `${err.name} ${err.message}` : String(err);
+  return /DEADLINE_EXCEEDED|timed? ?out|aborted|AbortError|"code":\s*504/i.test(msg);
+}
+
+const HEDGE_AFTER_MS = 8_000; // no response yet -> also start the next model
+const FIRST_CHUNK_TIMEOUT_MS = 20_000; // a model that hasn't started answering by now is stuck
+const MAX_IN_FLIGHT = 2;
+
+export interface RaceOptions {
+  hedgeAfterMs?: number;
+  firstChunkTimeoutMs?: number;
+  deadline?: number;
+  maxInFlight?: number;
+  onSuccess?: (model: string) => void;
+  onBusy?: (model: string, err: unknown) => void;
+  onRetired?: (model: string) => void;
+  isRetired?: (err: unknown) => boolean;
+  isTransient?: (err: unknown) => boolean;
+}
+
+/**
+ * Tries models in order, "hedging" slow starts: if the running model hasn't started answering
+ * (no first streamed chunk) within hedgeAfterMs, the next model starts too, and the first one to
+ * finish wins; the others are cancelled. Healthy models start streaming in ~1-2 s, so normally
+ * only one request is made. A failed model is replaced by the next one immediately.
+ *
+ * `attempt(model, signal, onFirstChunk)` must honour `signal` and call onFirstChunk when output starts.
+ */
+export function raceGeminiModels<T>(
+  models: string[],
+  attempt: (model: string, signal: AbortSignal, onFirstChunk: () => void) => Promise<T>,
+  opts: RaceOptions = {}
+): Promise<T> {
+  const hedgeAfterMs = opts.hedgeAfterMs ?? HEDGE_AFTER_MS;
+  const firstChunkTimeoutMs = opts.firstChunkTimeoutMs ?? FIRST_CHUNK_TIMEOUT_MS;
+  const deadline = opts.deadline ?? Date.now() + GEMINI_TOTAL_BUDGET_MS;
+  const maxInFlight = opts.maxInFlight ?? MAX_IN_FLIGHT;
+  const isRetired = opts.isRetired ?? isModelUnavailable;
+  const isTransient = opts.isTransient ?? isTransientGeminiError;
+
+  return new Promise<T>((resolve, reject) => {
+    let next = 0;
+    let settled = false;
+    let lastErr: unknown = new Error('No Gemini model available');
+    const running = new Map<string, { ctrl: AbortController; started: boolean; timers: NodeJS.Timeout[] }>();
+    const overall = setTimeout(() => finishFail(new Error('Gemini request timed out')), Math.max(0, deadline - Date.now()));
+
+    const cleanup = () => {
+      clearTimeout(overall);
+      for (const r of running.values()) {
+        r.timers.forEach(clearTimeout);
+        r.ctrl.abort();
+      }
+      running.clear();
+    };
+    const finishFail = (err: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(err);
+    };
+    const maybeAllFailed = () => {
+      if (!settled && running.size === 0 && next >= models.length) finishFail(lastErr);
+    };
+
+    const launch = () => {
+      if (settled || next >= models.length || running.size >= maxInFlight) return maybeAllFailed();
+      if (deadline - Date.now() < 3000) return maybeAllFailed();
+      const model = models[next++];
+      const ctrl = new AbortController();
+      const entry = { ctrl, started: false, timers: [] as NodeJS.Timeout[] };
+      running.set(model, entry);
+
+      // Hedge: still silent after hedgeAfterMs -> start the next model alongside.
+      entry.timers.push(setTimeout(() => !entry.started && launch(), hedgeAfterMs));
+      // Stuck: still silent after firstChunkTimeoutMs -> give up on this model.
+      entry.timers.push(
+        setTimeout(() => !entry.started && ctrl.abort(new Error('Gemini model timed out (no response)')), firstChunkTimeoutMs)
+      );
+
+      attempt(model, ctrl.signal, () => {
+        entry.started = true;
+      }).then(
+        (result) => {
+          entry.timers.forEach(clearTimeout);
+          running.delete(model);
+          if (settled) return;
+          settled = true;
+          opts.onSuccess?.(model);
+          cleanup(); // cancel the slower attempt(s)
+          resolve(result);
+        },
+        (err) => {
+          entry.timers.forEach(clearTimeout);
+          running.delete(model);
+          if (settled) return; // cancelled because another model already won
+          lastErr = err;
+          if (isRetired(err)) opts.onRetired?.(model);
+          else if (isTransient(err) || ctrl.signal.aborted) opts.onBusy?.(model, err);
+          else return finishFail(err); // e.g. bad key / bad request: another model won't help
+          launch();
+          maybeAllFailed();
+        }
+      );
+    };
+
+    launch();
+  });
+}
+
+/**
+ * Gemini generateContent with automatic model selection and hedged fallback (see raceGeminiModels),
+ * within a ~90 s total budget. Retired models are remembered; busy ones rest for 10 minutes; the model
+ * that last worked is tried first. Uses streaming so a healthy model is recognised within seconds.
+ * Errors come back human-readable.
+ */
+async function generateWithCurrentModel(
+  ai: GoogleGenAI,
+  params: Omit<GenerateContentParameters, 'model'>,
+  task: GeminiTask = 'heavy'
+): Promise<{ text: string; model: string }> {
+  const models = await resolveGeminiModels(ai, task); // may throw GeminiQuotaError (already human-readable)
+  try {
+    return await raceGeminiModels(
+      models,
+      async (model, signal, onFirstChunk) => {
+        geminiUsage().record(model);
+        const stream = await ai.models.generateContentStream({
+          ...params,
+          model,
+          config: { ...params.config, abortSignal: signal },
+        });
+        let text = '';
+        for await (const chunk of stream) {
+          if (signal.aborted) throw signal.reason ?? new Error('aborted');
+          const piece = chunk.text ?? '';
+          if (piece) onFirstChunk();
+          text += piece;
+        }
+        if (!text.trim()) throw new Error('Gemini returned an empty response (high demand?)');
+        return { text, model };
+      },
+      {
+        onSuccess: (model) => {
+          lastGoodModel[task] = model;
+          busyUntil.delete(model);
+        },
+        onBusy: (model, err) => {
+          const now = Date.now();
+          const quota = classifyQuotaError(err);
+          if (quota === 'day') {
+            quotaBlockedUntil.set(model, nextPacificMidnight(now));
+            geminiUsage().markDayExhausted(model, now);
+          } else if (quota === 'minute') {
+            quotaBlockedUntil.set(model, now + MINUTE_QUOTA_BACKOFF_MS);
+          } else {
+            busyUntil.set(model, now + BUSY_COOLDOWN_MS);
+          }
+          if (lastGoodModel[task] === model) lastGoodModel[task] = null;
+        },
+        onRetired: (model) => {
+          retiredGeminiModels.add(model);
+        },
+      }
+    );
+  } catch (err) {
+    throw new Error(describeGeminiError(err));
+  }
+}
 
 export function getGeminiApiKey(): string {
   const row = db
@@ -153,7 +533,18 @@ function findJsonLdRecipe(node: unknown): Record<string, unknown> | null {
   return null;
 }
 
-export async function extractRecipeFromUrl(url: string): Promise<Omit<Recipe, 'id' | 'createdAt'>> {
+export interface ExtractOptions {
+  /**
+   * Preview (used to verify meal-search results): only real schema.org recipe data, no Gemini calls,
+   * nothing saved to disk (image stays a remote link until the recipe is saved).
+   */
+  preview?: boolean;
+}
+
+export async function extractRecipeFromUrl(
+  url: string,
+  opts: ExtractOptions = {}
+): Promise<Omit<Recipe, 'id' | 'createdAt'>> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 12000);
   const res = await fetch(url, {
@@ -168,6 +559,7 @@ export async function extractRecipeFromUrl(url: string): Promise<Omit<Recipe, 'i
   if (!res.ok) {
     throw new Error(`Failed to fetch URL (${res.status})`);
   }
+  const finalUrl = (res.url || url).split('#')[0];
 
   const html = await res.text();
   const $ = cheerio.load(html);
@@ -253,7 +645,7 @@ export async function extractRecipeFromUrl(url: string): Promise<Omit<Recipe, 'i
     // If Gemini is configured, optionally refine ingredient parsing; otherwise local parser handles it immediately
     let ingredients = rawIngs.map(parseIngredientLine);
     const apiKey = getGeminiApiKey();
-    if (apiKey && rawIngs.length > 0) {
+    if (apiKey && rawIngs.length > 0 && !opts.preview) {
       try {
         ingredients = await normalizeIngredientsWithGemini(apiKey, rawIngs);
       } catch {
@@ -261,12 +653,12 @@ export async function extractRecipeFromUrl(url: string): Promise<Omit<Recipe, 'i
       }
     }
 
-    const localImg = await cacheRemoteImageLocally(heroImg);
+    const localImg = opts.preview ? heroImg || null : await cacheRemoteImageLocally(heroImg);
     return {
       title: rawTitle,
       description: rawDesc,
       imageUrl: localImg,
-      sourceUrl: url,
+      sourceUrl: opts.preview ? finalUrl : url,
       prepMinutes: parseIsoDurationMinutes(ldRecipe.prepTime),
       cookMinutes: parseIsoDurationMinutes(ldRecipe.cookTime),
       servings: servingsMatch ? Number(servingsMatch[1]) : 4,
@@ -274,10 +666,12 @@ export async function extractRecipeFromUrl(url: string): Promise<Omit<Recipe, 'i
       ingredients,
       instructions: rawSteps.filter(Boolean),
       favorite: false,
+      nutrition: normalizeNutrition(ldRecipe.nutrition),
     };
   }
 
   // 2. Fallback: Clean DOM text + Gemini structured extraction for non-JSON-LD sites
+  if (opts.preview) throw new Error('No structured recipe data on this page');
   const apiKey = getGeminiApiKey();
   if (!apiKey) {
     throw new Error(
@@ -303,8 +697,7 @@ async function normalizeIngredientsWithGemini(
   lines: string[]
 ): Promise<RecipeIngredient[]> {
   const ai = new GoogleGenAI({ apiKey });
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
+  const response = await generateWithCurrentModel(ai, {
     contents: `Parse these recipe ingredient strings into clean shopping list objects:\n${JSON.stringify(lines)}`,
     config: {
       responseMimeType: 'application/json',
@@ -326,7 +719,7 @@ async function normalizeIngredientsWithGemini(
         },
       },
     },
-  });
+  }, 'light');
 
   const parsed = JSON.parse(response.text || '[]') as RecipeIngredient[];
   return parsed.map((ing) => ({
@@ -345,8 +738,7 @@ async function extractRecipeWithGeminiFromText(
   text: string
 ): Promise<Omit<Recipe, 'id' | 'createdAt' | 'imageUrl' | 'sourceUrl' | 'favorite'>> {
   const ai = new GoogleGenAI({ apiKey });
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
+  const response = await generateWithCurrentModel(ai, {
     contents: `Extract ONLY the recipe from the webpage text below. Strip all blog stories, ads, and commentary.\n\n${text}`,
     config: {
       responseMimeType: 'application/json',
@@ -383,69 +775,177 @@ async function extractRecipeWithGeminiFromText(
   return JSON.parse(response.text || '{}');
 }
 
-export async function searchOrGenerateMealsWithGemini(
-  query: string
-): Promise<Omit<Recipe, 'id' | 'createdAt'>[]> {
+export interface FoundRecipe extends Omit<Recipe, 'id' | 'createdAt'> {
+  /** Website the recipe came from, e.g. "budgetbytes.com" */
+  site: string;
+  /** True if this page is already in the recipe library */
+  alreadySaved: boolean;
+}
+
+// Hosts that refused automated downloads recently; skipped for a while instead of retried.
+const blockedRecipeHosts = new Map<string, number>();
+const BLOCKED_HOST_COOLDOWN_MS = 6 * 60 * 60 * 1000;
+// Sites that refuse automated downloads (HTTP 403), seen while testing in Nov 2026.
+const KNOWN_BLOCKING_HOSTS = [
+  'allrecipes.com', 'eatingwell.com', 'thekitchn.com', 'damndelicious.net', 'therecipecritic.com',
+  'themagicalslowcooker.com', 'cookieandkate.com', 'budgetbytes.com', 'simplyrecipes.com', 'seriouseats.com',
+  'bonappetit.com', 'foodnetwork.com', 'delish.com', 'tasteofhome.com',
+];
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
+function isLikelyBlocked(url: string): boolean {
+  const host = hostOf(url);
+  if (KNOWN_BLOCKING_HOSTS.some((h) => host === h || host.endsWith('.' + h))) return true;
+  return (blockedRecipeHosts.get(host) ?? 0) > Date.now();
+}
+
+/** Pulls {title,url} candidates out of a model reply (JSON array, possibly wrapped in prose/code fences). */
+export function parseCandidateLinks(text: string): Array<{ title: string; url: string }> {
+  const out: Array<{ title: string; url: string }> = [];
+  const arr = text.match(/\[[\s\S]*\]/)?.[0];
+  if (arr) {
+    try {
+      for (const item of JSON.parse(arr) as Array<Record<string, unknown>>) {
+        if (item && typeof item.url === 'string') out.push({ title: String(item.title || ''), url: item.url.trim() });
+      }
+    } catch {
+      // fall through to bare URL scan
+    }
+  }
+  if (out.length === 0) {
+    for (const m of text.matchAll(/https?:\/\/[^\s"'<>)\]]+/g)) out.push({ title: '', url: m[0] });
+  }
+  return out.filter((c) => /^https?:\/\//.test(c.url));
+}
+
+const CANDIDATE_PROMPT = (query: string) => `Find real, existing recipe pages on the web for: "${query}".
+Prefer independent food blogs that publish full recipes, for example recipetineats.com, pinchofyum.com, loveandlemons.com, wellplated.com, inspiredtaste.net, averiecooks.com, carlsbadcravings.com, chefsavvy.com, realfoodwholelife.com.
+Do not use allrecipes.com, eatingwell.com, thekitchn.com, budgetbytes.com, simplyrecipes.com, cookieandkate.com, seriouseats.com or bonappetit.com.
+Reply ONLY with a JSON array of 8 objects: [{"title": "...", "url": "https://..."}], using exact page URLs you are confident exist. No commentary.`;
+
+/** Asks Gemini for candidate recipe page links: with Google Search when the key allows it, else from its own knowledge. */
+// Google Search grounding isn't always included in the free tier; after a refusal, don't spend requests on it.
+let groundingBlockedUntil = 0;
+
+async function geminiCandidateLinks(ai: GoogleGenAI, query: string): Promise<Array<{ title: string; url: string }>> {
+  if (Date.now() >= groundingBlockedUntil) try {
+    const model = (await resolveGeminiModels(ai, 'heavy'))[0];
+    geminiUsage().record(model);
+    const grounded = await ai.models.generateContent({
+      model,
+      contents: CANDIDATE_PROMPT(query),
+      config: { tools: [{ googleSearch: {} }], httpOptions: { timeout: 30_000 } },
+    });
+    const fromText = parseCandidateLinks(grounded.text || '');
+    const fromSources = (grounded.candidates?.[0]?.groundingMetadata?.groundingChunks || [])
+      .map((c) => c.web)
+      .filter((w): w is { uri: string; title?: string } => Boolean(w?.uri))
+      .map((w) => ({ title: w.title || '', url: w.uri }));
+    const merged = [...fromText, ...fromSources];
+    if (merged.length > 0) return merged;
+  } catch (err) {
+    // Search grounding unavailable on this key/plan right now; fall back to plain suggestions.
+    if (err instanceof GeminiQuotaError) throw new Error(err.message);
+    groundingBlockedUntil = classifyQuotaError(err) ? nextPacificMidnight(Date.now()) : Date.now() + BUSY_COOLDOWN_MS;
+  }
+  // Full Flash first: Flash-Lite tends to invent recipe URLs that don't exist.
+  const plain = await generateWithCurrentModel(ai, { contents: CANDIDATE_PROMPT(query) }, 'heavy');
+  return parseCandidateLinks(plain.text);
+}
+
+/**
+ * Meal search that only returns REAL recipes: Gemini proposes recipe page links, then each page is
+ * opened with the URL importer and kept only if it really is a recipe page that can be read
+ * (made-up links, non-recipe pages and sites that block downloads are dropped). Photo, ingredients,
+ * steps and nutrition all come from the page itself.
+ */
+export async function searchOrGenerateMealsWithGemini(query: string, want = 3): Promise<FoundRecipe[]> {
   const apiKey = getGeminiApiKey();
   if (!apiKey) {
     throw new Error('Configure your Gemini API Key in Settings to use AI Meal Search & Recipe Discovery.');
   }
   const ai = new GoogleGenAI({ apiKey });
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: `The user is searching for family meals matching: "${query}".
-Return 3 practical, delicious, well-tested home-cooked recipes with exact ingredient quantities and clear step-by-step instructions (no fluff).`,
-    config: {
-      responseMimeType: 'application/json',
-      responseSchema: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING },
-            description: { type: Type.STRING },
-            prepMinutes: { type: Type.INTEGER },
-            cookMinutes: { type: Type.INTEGER },
-            servings: { type: Type.INTEGER },
-            tags: { type: Type.ARRAY, items: { type: Type.STRING } },
-            ingredients: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  name: { type: Type.STRING },
-                  quantity: { type: Type.NUMBER, nullable: true },
-                  unit: { type: Type.STRING },
-                  notes: { type: Type.STRING },
-                  category: { type: Type.STRING, enum: GROCERY_CATEGORIES },
-                },
-                required: ['name', 'unit', 'notes', 'category'],
-              },
-            },
-            instructions: { type: Type.ARRAY, items: { type: Type.STRING } },
-          },
-          required: ['title', 'description', 'prepMinutes', 'cookMinutes', 'servings', 'tags', 'ingredients', 'instructions'],
-        },
-      },
-    },
-  });
+  const candidates = await geminiCandidateLinks(ai, query);
 
-  const items = JSON.parse(response.text || '[]') as Array<
-    Omit<Recipe, 'id' | 'createdAt' | 'imageUrl' | 'sourceUrl' | 'favorite'>
-  >;
-  return items.map((r) => ({
-    ...r,
-    imageUrl: null,
-    sourceUrl: null,
-    favorite: false,
-  }));
+  const seen = new Set<string>();
+  const queue = candidates
+    .map((c) => c.url.split('#')[0])
+    .filter((u) => {
+      if (seen.has(u) || isLikelyBlocked(u)) return false;
+      seen.add(u);
+      return true;
+    })
+    .slice(0, 10);
+
+  const found: FoundRecipe[] = [];
+  const foundUrls = new Set<string>();
+  let next = 0;
+  const worker = async () => {
+    while (next < queue.length && found.length < want) {
+      const url = queue[next++];
+      try {
+        const r = await extractRecipeFromUrl(url, { preview: true });
+        if (!r.title || r.ingredients.length === 0 || r.instructions.length === 0) continue;
+        if (foundUrls.has(r.sourceUrl || url)) continue;
+        foundUrls.add(r.sourceUrl || url);
+        const alreadySaved = Boolean(
+          db.prepare('SELECT 1 FROM recipes WHERE source_url = ? OR source_url = ? LIMIT 1').get(url, r.sourceUrl || url)
+        );
+        if (found.length < want) found.push({ ...r, site: hostOf(r.sourceUrl || url), alreadySaved });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/\((401|403|429)\)/.test(msg)) blockedRecipeHosts.set(hostOf(url), Date.now() + BLOCKED_HOST_COOLDOWN_MS);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: 4 }, worker));
+
+  if (found.length === 0) {
+    throw new Error(
+      `Couldn't find recipe pages Lucarne can read for "${query}". Try different words, or paste a recipe link in the "Strip Recipe Website URL" tab.`
+    );
+  }
+  return found;
 }
 
 /**
  * Flexible JSON Seed Importer for Phase 3:
  * Accepts `[...]`, `{ meals: [...] }`, or `{ recipes: [...] }` with flexible property names.
  */
-export function importMealsSeedJson(payload: unknown): { imported: number; ids: string[] } {
+export interface MealsImportResult {
+  imported: number;
+  skipped: number;
+  /** Existing recipes that had no photo and got one from this file. */
+  imagesAdded: number;
+  ids: string[];
+  /** Recipes whose image_url is a remote link that should be downloaded (see cacheRecipeImages). */
+  imageIds: string[];
+}
+
+/** Downloads remote recipe images to local storage (like URL import does). Returns how many succeeded. */
+export async function cacheRecipeImages(ids: string[]): Promise<number> {
+  let cached = 0;
+  for (const id of ids) {
+    const row = db.prepare('SELECT image_url FROM recipes WHERE id = ?').get(id) as { image_url: string | null } | undefined;
+    if (!row?.image_url || !row.image_url.startsWith('http')) continue;
+    const local = await cacheRemoteImageLocally(row.image_url);
+    if (local && local.startsWith('/media/')) {
+      db.prepare('UPDATE recipes SET image_url = ? WHERE id = ?').run(local, id);
+      cached++;
+    }
+  }
+  if (cached > 0) broadcastInvalidate(['recipes']);
+  return cached;
+}
+
+export function importMealsSeedJson(payload: unknown): MealsImportResult {
   let rawList: unknown[] = [];
   if (Array.isArray(payload)) {
     rawList = payload;
@@ -459,6 +959,13 @@ export function importMealsSeedJson(payload: unknown): { imported: number; ids: 
 
   const nowIso = new Date().toISOString();
   const ids: string[] = [];
+  let skipped = 0;
+  let imagesAdded = 0;
+  const imageIds: string[] = [];
+  // Re-importing the same file must not create duplicates: match on source URL, else title.
+  const existsBySource = db.prepare('SELECT id, image_url FROM recipes WHERE source_url = ? LIMIT 1');
+  const existsByTitle = db.prepare('SELECT id, image_url FROM recipes WHERE lower(title) = lower(?) LIMIT 1');
+  const setImage = db.prepare('UPDATE recipes SET image_url = ? WHERE id = ?');
 
   const insertStmt = db.prepare(`
     INSERT INTO recipes (
@@ -483,6 +990,20 @@ export function importMealsSeedJson(payload: unknown): { imported: number; ids: 
         typeof (item.sourceUrl || item.url || item.link) === 'string'
           ? String(item.sourceUrl || item.url || item.link)
           : null;
+
+      const existing = (sourceUrl ? existsBySource.get(sourceUrl) : existsByTitle.get(title)) as
+        | { id: string; image_url: string | null }
+        | undefined;
+      if (existing) {
+        skipped++;
+        // Fill in a missing photo on an existing recipe (never replace one it already has).
+        if (!existing.image_url && imageUrl) {
+          setImage.run(imageUrl, existing.id);
+          imagesAdded++;
+          if (imageUrl.startsWith('http')) imageIds.push(existing.id);
+        }
+        continue;
+      }
 
       const prepMinutes = parseIsoDurationMinutes(item.prepMinutes ?? item.prepTime ?? item.prep_time);
       const cookMinutes = parseIsoDurationMinutes(item.cookMinutes ?? item.cookTime ?? item.cook_time);
@@ -557,8 +1078,11 @@ export function importMealsSeedJson(payload: unknown): { imported: number; ids: 
         nowIso
       );
       ids.push(id);
+      const nutrition = normalizeNutrition(item.nutrition);
+      if (nutrition) db.prepare('UPDATE recipes SET nutrition_json = ? WHERE id = ?').run(JSON.stringify(nutrition), id);
+      if (imageUrl && imageUrl.startsWith('http')) imageIds.push(id);
     }
   });
 
-  return { imported: ids.length, ids };
+  return { imported: ids.length, skipped, imagesAdded, ids, imageIds };
 }

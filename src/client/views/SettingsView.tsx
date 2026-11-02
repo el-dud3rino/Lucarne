@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowDown,
@@ -9,6 +9,9 @@ import {
   Edit2,
   Image as ImageIcon,
   Keyboard,
+  AlertTriangle,
+  CheckCircle2,
+  Loader2,
   LogOut,
   Moon,
   Plus,
@@ -20,7 +23,13 @@ import {
   X,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api.js';
+import { timeAgo } from '../lib/time.js';
+import { EmojiPickerButton } from '../components/EmojiPicker.js';
+import { SharedAlbumsSection } from '../components/SharedAlbumsSection.js';
+import { CATEGORY_STYLES, EVENT_CATEGORIES, type EventCategory } from '../../shared/eventCategories.js';
+import { CopyButton, Linkify, NoticeBanner, type NoticeTone } from '../components/NoticeBanner.js';
 import { WeatherWidget } from '../components/WeatherWidget.js';
+import { KeepSyncSection } from '../components/KeepSyncSection.js';
 import {
   SKYLIGHT_COLOR_PRESETS,
   type AppSettings,
@@ -43,7 +52,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, members })
   const [clientId, setClientId] = useState(settings.googleClientId || '');
   const [clientSecret, setClientSecret] = useState('');
   const [geminiKey, setGeminiKey] = useState('');
-  const [statusBanner, setStatusBanner] = useState('');
+  const [banner, setBanner] = useState<{ text: string; tone: NoticeTone } | null>(null);
+  /** Success/info notice; passing '' clears it (but never clears an error the user hasn't read). */
+  const setStatusBanner = (text: string, tone: Exclude<NoticeTone, 'error'> = 'success') =>
+    setBanner((prev) => (text ? { text, tone } : prev?.tone === 'error' ? prev : null));
+  /** Errors stay until dismissed and can be copied. */
+  const showError = (err: unknown, fallback = 'Something went wrong') =>
+    setBanner({ text: err instanceof Error ? err.message : typeof err === 'string' ? err : fallback, tone: 'error' });
 
   // Weather state
   const [weatherCityInput, setWeatherCityInput] = useState(settings.weatherLocationName || '');
@@ -60,6 +75,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, members })
     sessionId: string;
     pickerUri: string;
   } | null>(null);
+  const pickerStartedAt = useRef(0);
 
   // New family member form state
   const [newMemberName, setNewMemberName] = useState('');
@@ -224,23 +240,79 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, members })
   });
 
   const updateSourceMutation = useMutation({
-    mutationFn: async (vars: { id: string; enabled?: boolean; memberId?: string | null }) =>
+    mutationFn: async (vars: { id: string; enabled?: boolean; memberIds?: string[]; category?: EventCategory | null }) =>
       apiFetch(`/api/settings/google/sources/${vars.id}`, {
         method: 'PUT',
         body: JSON.stringify(vars),
       }),
-    onSuccess: () => {
+    // Instant feedback on the wall: update the row before the server answers.
+    onMutate: async (vars) => {
+      await queryClient.cancelQueries({ queryKey: ['settings', 'google'] });
+      const previous = queryClient.getQueryData<{ accounts: GoogleAccountInfo[]; sources: CalendarSource[] }>([
+        'settings',
+        'google',
+      ]);
+      if (previous) {
+        queryClient.setQueryData(['settings', 'google'], {
+          ...previous,
+          sources: previous.sources.map((s) =>
+            s.id === vars.id
+              ? {
+                  ...s,
+                  ...(vars.enabled !== undefined ? { enabled: vars.enabled } : {}),
+                  ...(vars.memberIds !== undefined ? { memberIds: vars.memberIds } : {}),
+                  ...(vars.category !== undefined ? { category: vars.category } : {}),
+                }
+              : s
+          ),
+        });
+      }
+      return { previous };
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.previous) queryClient.setQueryData(['settings', 'google'], ctx.previous);
+      showError(err instanceof Error ? `Could not save calendar change: ${err.message}` : 'Could not save calendar change');
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['settings'] });
       queryClient.invalidateQueries({ queryKey: ['events'] });
     },
   });
+
+  const calendarSyncMutation = useMutation({
+    mutationFn: () =>
+      apiFetch<{
+        ok: boolean;
+        accounts: number;
+        synced: number;
+        eventCount: number;
+        failed: Array<{ calendar: string; account: string; message: string }>;
+      }>('/api/settings/google/sync-now', { method: 'POST' }),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings'] });
+      queryClient.invalidateQueries({ queryKey: ['events'] });
+    },
+  });
+
+  const toggleSourceMember = (src: CalendarSource, memberId: string) => {
+    const memberIds = src.memberIds.includes(memberId)
+      ? src.memberIds.filter((id) => id !== memberId)
+      : [...src.memberIds, memberId];
+    updateSourceMutation.mutate({ id: src.id, memberIds });
+  };
+
+  const lastCalendarSync = (googleData?.accounts ?? [])
+    .map((a) => a.lastSyncedAt)
+    .filter((t): t is string => Boolean(t))
+    .sort()
+    .pop();
 
   const connectGoogleAccount = async () => {
     try {
       const { url } = await apiFetch<{ url: string }>('/api/settings/google/auth-url');
       window.location.href = url;
     } catch (err) {
-      setStatusBanner(err instanceof Error ? err.message : 'Configure Google Client ID first');
+      showError(err, 'Configure the Google Client ID first');
     }
   };
 
@@ -254,32 +326,78 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, members })
         }
       );
       setPickerSession({ accountId, ...s });
-      window.open(s.pickerUri, '_blank');
+      pickerStartedAt.current = Date.now();
+      setStatusBanner(
+        'Pick photos in the Google Photos tab, then tap Done there. To add a whole album, search for the album name in the picker and select all of its photos. Lucarne imports them automatically when you finish.',
+        'info'
+      );
+      // "/autoclose" closes Google's tab automatically after the user taps Done.
+      window.open(`${s.pickerUri.replace(/\/$/, '')}/autoclose`, '_blank');
     } catch (err) {
-      setStatusBanner(err instanceof Error ? err.message : 'Failed to start Picker');
+      showError(err, 'Could not open the Google Photos picker');
     }
   };
 
-  const checkPickerDone = async () => {
-    if (!pickerSession) return;
-    const res = await apiFetch<{ ready: boolean; importedCount: number }>(
-      '/api/photos/picker/poll',
-      {
+  /** Returns the suggested wait before the next check, or null when the session is finished. */
+  const checkPickerDone = async (manual = false): Promise<number | null> => {
+    if (!pickerSession) return null;
+    try {
+      const res = await apiFetch<{
+        ready: boolean;
+        importedCount: number;
+        alreadyHadCount: number;
+        skippedVideoCount: number;
+        failedCount: number;
+        pollIntervalMs?: number;
+      }>('/api/photos/picker/poll', {
         method: 'POST',
-        body: JSON.stringify({
-          accountId: pickerSession.accountId,
-          sessionId: pickerSession.sessionId,
-        }),
+        body: JSON.stringify({ accountId: pickerSession.accountId, sessionId: pickerSession.sessionId }),
+      });
+      if (!res.ready) {
+        if (manual) setStatusBanner('Still waiting: finish picking in the Google Photos tab and tap Done.', 'info');
+        return res.pollIntervalMs ?? 4000;
       }
-    );
-    if (res.ready) {
-      setStatusBanner(`Imported ${res.importedCount} photos to local SSD!`);
       setPickerSession(null);
       queryClient.invalidateQueries({ queryKey: ['photos'] });
-    } else {
-      setStatusBanner('Waiting for photo selection in Google Photos Picker...');
+      const parts = [`Imported ${res.importedCount} photo${res.importedCount === 1 ? '' : 's'}`];
+      if (res.alreadyHadCount) parts.push(`${res.alreadyHadCount} already in the gallery`);
+      if (res.skippedVideoCount) parts.push(`${res.skippedVideoCount} video${res.skippedVideoCount === 1 ? '' : 's'} skipped`);
+      if (res.failedCount) {
+        parts.push(`${res.failedCount} failed to download`);
+        showError(`${parts.join(' · ')}. Try importing the failed ones again.`);
+      } else {
+        setStatusBanner(parts.join(' · '));
+      }
+      return null;
+    } catch (err) {
+      setPickerSession(null);
+      showError(err, 'Photo import failed');
+      return null;
     }
   };
+
+  // Poll the picker session automatically while the user picks (up to 20 minutes).
+  useEffect(() => {
+    if (!pickerSession) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = async () => {
+      if (cancelled) return;
+      if (Date.now() - pickerStartedAt.current > 20 * 60_000) {
+        setPickerSession(null);
+        showError('Photo picking timed out after 20 minutes. Start the import again when ready.');
+        return;
+      }
+      const next = await checkPickerDone();
+      if (!cancelled && next !== null) timer = setTimeout(tick, Math.max(2000, Math.min(next, 10_000)));
+    };
+    timer = setTimeout(tick, 4000);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickerSession]);
 
   const handlePhotoUpload = async (file: File) => {
     const reader = new FileReader();
@@ -288,10 +406,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, members })
       const img = new Image();
       img.onload = async () => {
         const orientation = img.height > img.width ? 'portrait' : 'landscape';
-        await apiFetch('/api/photos/upload', {
-          method: 'POST',
-          body: JSON.stringify({ dataUrl, orientation }),
-        });
+        try {
+          await apiFetch('/api/photos/upload', {
+            method: 'POST',
+            body: JSON.stringify({ dataUrl, orientation }),
+          });
+        } catch (err) {
+          showError(err, 'Photo upload failed');
+          return;
+        }
         queryClient.invalidateQueries({ queryKey: ['photos'] });
         setStatusBanner('Photo uploaded to screensaver.');
         setTimeout(() => setStatusBanner(''), 2500);
@@ -302,7 +425,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, members })
   };
 
   const triggerBackup = async () => {
-    await apiFetch('/api/settings/backup', { method: 'POST' });
+    try {
+      await apiFetch('/api/settings/backup', { method: 'POST' });
+    } catch (err) {
+      showError(err, 'Backup failed');
+      return;
+    }
     queryClient.invalidateQueries({ queryKey: ['settings'] });
     setStatusBanner('SQLite snapshot saved to data/backups/!');
     setTimeout(() => setStatusBanner(''), 3000);
@@ -315,9 +443,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, members })
 
   return (
     <div className="h-full overflow-y-auto overflow-x-hidden pr-1 space-y-5 pb-16">
-      {statusBanner && (
-        <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 font-bold text-sm">
-          {statusBanner}
+      {banner && (
+        <div className="sticky top-0 z-20">
+          <NoticeBanner text={banner.text} tone={banner.tone} onDismiss={() => setBanner(null)} />
         </div>
       )}
 
@@ -671,17 +799,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, members })
             {pickerSession && (
               <button
                 type="button"
-                onClick={checkPickerDone}
+                onClick={() => checkPickerDone(true)}
                 className="h-10 min-h-[40px] px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs min-w-[40px]"
               >
-                Complete Import
+                Waiting for picks… check now
               </button>
             )}
           </div>
 
-          {/* Active Photos Thumbnail Grid with 1-Tap Delete */}
+          <SharedAlbumsSection />
+
+          {/* Individually added photos (album photos are managed per album above, to keep this grid light) */}
+          {photos.some((p) => p.albumId) && (
+            <div className="text-xs text-stone-500">
+              {photos.filter((p) => p.albumId).length.toLocaleString()} photos come from shared albums.
+              Individually added photos:
+            </div>
+          )}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-72 overflow-y-auto pr-1">
-            {photos.map((p) => (
+            {photos.filter((p) => !p.albumId).map((p) => (
               <div
                 key={p.id}
                 className="group relative rounded-2xl overflow-hidden border border-stone-200 bg-stone-100 aspect-video flex flex-col justify-between p-1.5 shadow-2xs"
@@ -734,19 +870,53 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, members })
             </h3>
             <button
               type="button"
-              onClick={() =>
-                apiFetch('/api/settings/google/sync-now', { method: 'POST' }).then(() => {
-                  queryClient.invalidateQueries({ queryKey: ['settings'] });
-                  queryClient.invalidateQueries({ queryKey: ['events'] });
-                  setStatusBanner('Calendar synchronization complete.');
-                  setTimeout(() => setStatusBanner(''), 2500);
-                })
-              }
-              className="h-10 min-h-[40px] min-w-[40px] px-3.5 py-1.5 rounded-xl bg-stone-100 hover:bg-stone-200 text-xs font-bold flex items-center gap-1.5"
+              onClick={() => calendarSyncMutation.mutate()}
+              disabled={calendarSyncMutation.isPending}
+              className="h-10 min-h-[40px] min-w-[40px] px-3.5 py-1.5 rounded-xl bg-stone-100 hover:bg-stone-200 disabled:opacity-70 text-xs font-bold flex items-center gap-1.5"
             >
-              <RefreshCw className="w-3.5 h-3.5" />
-              Sync Now
+              <RefreshCw className={`w-3.5 h-3.5 ${calendarSyncMutation.isPending ? 'animate-spin' : ''}`} />
+              {calendarSyncMutation.isPending ? 'Syncing…' : 'Sync Now'}
             </button>
+          </div>
+
+          {/* Calendar sync status / result */}
+          <div aria-live="polite" className="text-sm">
+            {calendarSyncMutation.isPending ? (
+              <div className="flex items-center gap-2 text-stone-500 font-semibold">
+                <Loader2 className="w-4 h-4 animate-spin" /> Syncing calendars with Google…
+              </div>
+            ) : calendarSyncMutation.isError ? (
+              <NoticeBanner text={`Sync failed: ${(calendarSyncMutation.error as Error).message}`} tone="error" />
+            ) : calendarSyncMutation.data && calendarSyncMutation.data.failed.length > 0 ? (
+              <div className="rounded-xl bg-rose-50 border border-rose-200 px-3 py-2 text-rose-700 space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 font-bold">
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    {calendarSyncMutation.data.synced} synced, {calendarSyncMutation.data.failed.length} failed
+                  </div>
+                  <CopyButton
+                    text={calendarSyncMutation.data.failed
+                      .map((f) => `${f.calendar}${f.account ? ` (${f.account})` : ''}: ${f.message}`)
+                      .join('\n')}
+                  />
+                </div>
+                {calendarSyncMutation.data.failed.map((f, i) => (
+                  <div key={i} className="text-xs select-text break-words">
+                    <span className="font-bold">{f.calendar}</span>
+                    {f.account ? ` (${f.account})` : ''}: <Linkify text={f.message} />
+                  </div>
+                ))}
+              </div>
+            ) : calendarSyncMutation.data ? (
+              <div className="flex items-center gap-2 text-emerald-700 font-semibold">
+                <CheckCircle2 className="w-4 h-4" />
+                {`Synced ${calendarSyncMutation.data.synced} calendar${calendarSyncMutation.data.synced === 1 ? '' : 's'} · ${calendarSyncMutation.data.eventCount} events · just now`}
+              </div>
+            ) : googleData?.accounts.length ? (
+              <div className="text-stone-500">
+                Syncs automatically every 90 seconds · last synced {timeAgo(lastCalendarSync)}
+              </div>
+            ) : null}
           </div>
 
           {/* Linked Google Accounts List with Disconnect Button */}
@@ -776,7 +946,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, members })
                       <div className="font-bold text-sm text-slate-800 truncate">
                         {acc.displayName}
                       </div>
-                      <div className="text-[11px] text-stone-500 truncate">{acc.email}</div>
+                      <div className="text-[11px] text-stone-500 truncate">
+                        {acc.email} · synced {timeAgo(acc.lastSyncedAt)}
+                      </div>
+                      {acc.syncStatus === 'error' && acc.syncError && (
+                        <div className="text-[11px] font-semibold text-rose-600 break-words select-text">
+                          <Linkify text={acc.syncError} />
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -860,53 +1037,98 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, members })
             + Link Google Account (Yours or Wife’s)
           </button>
 
-          {/* Discovered Sub-Calendars -> Map to Family Member */}
+          {/* Discovered calendars -> one or more family members */}
           {googleData && googleData.sources.length > 0 && (
-            <div className="space-y-2 pt-2 border-t border-stone-100 max-h-56 overflow-y-auto">
+            <div className="space-y-2 pt-2 border-t border-stone-100">
+              <div className="text-xs font-bold uppercase tracking-wider text-stone-400">
+                Calendars · tap everyone each calendar belongs to
+              </div>
               {googleData.sources.map((src) => (
                 <div
                   key={src.id}
-                  className="p-2.5 rounded-xl bg-stone-50 border border-stone-200 flex items-center justify-between gap-2"
+                  className={`p-2.5 rounded-xl border space-y-2 ${
+                    src.enabled ? 'bg-stone-50 border-stone-200' : 'bg-white border-stone-200/70'
+                  }`}
                 >
-                  <label className="flex items-center gap-2.5 min-w-0 cursor-pointer">
+                  <label className="flex items-center gap-2.5 min-w-0 min-h-[40px] cursor-pointer">
                     <input
                       type="checkbox"
                       checked={src.enabled}
-                      onChange={(e) =>
-                        updateSourceMutation.mutate({ id: src.id, enabled: e.target.checked })
-                      }
-                      className="w-4 h-4 rounded"
+                      onChange={(e) => updateSourceMutation.mutate({ id: src.id, enabled: e.target.checked })}
+                      className="w-5 h-5 rounded shrink-0"
                     />
-                    <div className="min-w-0">
-                      <div className="font-bold text-sm text-slate-800 truncate">{src.name}</div>
-                      <div className="text-[11px] text-stone-400 truncate">
-                        {src.accountEmail}
+                    <div className="min-w-0 flex-1">
+                      <div className={`font-bold text-sm truncate ${src.enabled ? 'text-slate-800' : 'text-stone-400'}`}>
+                        {src.name}
+                        {!src.enabled && <span className="ml-2 text-[11px] font-semibold">(not shown)</span>}
                       </div>
+                      <div className="text-[11px] text-stone-400 truncate">{src.accountEmail}</div>
+                      {src.enabled && src.syncError && (
+                        <div className="text-[11px] font-semibold text-rose-600 break-words select-text">
+                          Sync error: <Linkify text={src.syncError} />
+                        </div>
+                      )}
                     </div>
                   </label>
 
-                  <select
-                    value={src.memberId || ''}
-                    onChange={(e) =>
-                      updateSourceMutation.mutate({
-                        id: src.id,
-                        memberId: e.target.value || null,
-                      })
-                    }
-                    className="h-10 min-h-[40px] min-w-[40px] px-2.5 rounded-lg bg-white border border-stone-200 text-xs font-bold"
-                  >
-                    <option value="">Unassigned</option>
-                    {members.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.emoji} {m.name}
-                      </option>
-                    ))}
-                  </select>
+                  <div className={`flex flex-wrap gap-1.5 ${src.enabled ? '' : 'opacity-50'}`}>
+                    {members.map((m) => {
+                      const selected = src.memberIds.includes(m.id);
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          aria-pressed={selected}
+                          onClick={() => toggleSourceMember(src, m.id)}
+                          className="h-10 min-h-[40px] min-w-[40px] px-3 rounded-full border text-xs font-bold flex items-center gap-1.5 transition active:scale-95"
+                          style={
+                            selected
+                              ? { background: m.colorBg, color: m.colorText, borderColor: m.colorAccent }
+                              : { background: '#fff', color: '#78716c', borderColor: '#e7e5e4' }
+                          }
+                        >
+                          {selected ? <CheckCircle2 className="w-3.5 h-3.5" /> : <span>{m.emoji}</span>}
+                          {m.name}
+                        </button>
+                      );
+                    })}
+                    <span className="self-center w-px h-6 bg-stone-200 mx-1" aria-hidden />
+                    {EVENT_CATEGORIES.map((cat) => {
+                      const c = CATEGORY_STYLES[cat];
+                      const selected = src.category === cat;
+                      return (
+                        <button
+                          key={cat}
+                          type="button"
+                          aria-pressed={selected}
+                          title={`Show this calendar as ${c.label.toLowerCase()} (${c.icon} color)`}
+                          onClick={() => updateSourceMutation.mutate({ id: src.id, category: selected ? null : cat })}
+                          className="h-10 min-h-[40px] min-w-[40px] px-3 rounded-full border text-xs font-bold flex items-center gap-1.5 transition active:scale-95"
+                          style={
+                            selected
+                              ? { background: c.bg, color: c.text, borderColor: c.accent }
+                              : { background: '#fff', color: '#78716c', borderColor: '#e7e5e4' }
+                          }
+                        >
+                          <span aria-hidden>{c.icon}</span>
+                          {c.label}
+                        </button>
+                      );
+                    })}
+                    {src.memberIds.length === 0 && !src.category && (
+                      <span className="self-center text-[11px] text-stone-400 ml-1">
+                        Nobody selected: shows for everyone
+                      </span>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
           )}
         </section>
+
+        {/* 5b. Google Keep two-way list sync */}
+        <KeepSyncSection members={members} />
 
         {/* 6. Family Profiles & Colors (Heading verbatim for E2E tests) */}
         <section className="bg-white rounded-3xl border border-stone-200 p-5 space-y-4 shadow-2xs">
@@ -988,11 +1210,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, members })
             className="pt-2 border-t border-stone-100 space-y-2.5"
           >
             <div className="flex gap-2">
-              <input
-                type="text"
+              <EmojiPickerButton
                 value={newMemberEmoji}
-                onChange={(e) => setNewMemberEmoji(e.target.value)}
-                className="w-12 h-11 min-h-[40px] text-center rounded-xl bg-stone-50 border border-stone-200 text-lg"
+                onChange={setNewMemberEmoji}
+                label="Avatar emoji for new person"
               />
               <input
                 type="text"
@@ -1120,11 +1341,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, members })
                   Name & Avatar
                 </label>
                 <div className="flex gap-2">
-                  <input
-                    type="text"
+                  <EmojiPickerButton
                     value={editEmoji}
-                    onChange={(e) => setEditEmoji(e.target.value)}
-                    className="w-12 h-11 min-h-[40px] text-center rounded-xl bg-stone-50 border border-stone-200 text-lg"
+                    onChange={setEditEmoji}
+                    label={`Avatar emoji for ${editName || 'member'}`}
                   />
                   <input
                     type="text"

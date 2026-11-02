@@ -20,7 +20,9 @@
     "test:integration": "node --import tsx --test tests/integration/*.test.ts",
     "test:benchmarks": "node --import tsx --test tests/benchmarks/*.test.ts",
     "test:e2e": "npm run build && node --import tsx --test --test-concurrency=1 tests/e2e/*.spec.ts",
-    "test:all": "npm run test && npm run test:e2e"
+    "test:all": "npm run test && npm run test:e2e",
+    "keep:setup": "node scripts/keep-setup.mjs",
+    "keep:login": "node scripts/keep-login.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.0.0",

@@ -40,7 +40,7 @@ test('Lists Integration: grocery categorization, quantity parsing, duplicate mer
     const addedItem1 = (await addRes1.json()) as any;
     assert.equal(addedItem1.text, 'tomato sauce');
     assert.equal(addedItem1.quantity, '2 jars');
-    assert.equal(addedItem1.category, 'Produce');
+    assert.equal(addedItem1.category, 'Pantry', 'canned tomato sauce is a pantry item, not produce');
 
     // 3. Duplicate Merging: Add another "1 jar tomato sauce" to the same list
     const addRes2 = await app.request(`/api/lists/${groceryList.id}/items`, {

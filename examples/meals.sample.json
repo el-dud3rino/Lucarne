@@ -1,0 +1,53 @@
+{
+  "_about": "Sample Lucarne meals file. Import in the app (Meals -> Import -> JSON Meals Seed) or with: npm run import:meals -- examples/meals.sample.json . Only 'title' (or 'name') is required. Unknown keys like this one are ignored. Full field reference: README.md#importing-recipes-from-json",
+  "meals": [
+    {
+      "title": "Sheet Pan Lemon Herb Chicken",
+      "description": "Weeknight chicken thighs and potatoes roasted on one pan.",
+      "sourceUrl": "https://example.com/sheet-pan-lemon-herb-chicken",
+      "imageUrl": "https://images.unsplash.com/photo-1598515214211-89d3c73ae83b?w=1200",
+      "prepMinutes": 15,
+      "cookMinutes": 40,
+      "servings": 4,
+      "tags": ["dinner", "sheet pan", "kid-friendly"],
+      "favorite": true,
+      "ingredients": [
+        { "name": "boneless chicken thighs", "quantity": 2, "unit": "lb", "category": "Meat & Seafood" },
+        { "name": "baby potatoes", "quantity": 1.5, "unit": "lb", "notes": "halved" },
+        { "name": "lemon", "quantity": 1, "unit": "", "notes": "zested and juiced" },
+        { "name": "olive oil", "quantity": 3, "unit": "tbsp" },
+        { "name": "garlic", "quantity": 4, "unit": "cloves", "notes": "minced" },
+        { "name": "dried oregano", "quantity": 1, "unit": "tsp" }
+      ],
+      "instructions": [
+        "Heat the oven to 425°F.",
+        "Toss the potatoes with half the oil and salt; roast 15 minutes.",
+        "Mix the remaining oil, lemon, garlic and oregano; coat the chicken.",
+        "Add the chicken to the pan and roast 25 minutes more, until cooked through."
+      ]
+    },
+    {
+      "name": "Slow Cooker Black Bean Soup",
+      "summary": "Set it in the morning, top it at dinner.",
+      "url": "https://example.com/slow-cooker-black-bean-soup",
+      "prepTime": "PT15M",
+      "cookTime": "PT6H",
+      "yield": "6 servings",
+      "category": "soup",
+      "ingredients": [
+        "3 cans black beans, drained",
+        "1 yellow onion, diced",
+        "2 cups chicken broth",
+        "1 can diced tomatoes",
+        "1 tsp ground cumin",
+        "½ cup sour cream, for serving"
+      ],
+      "steps": "1. Add everything except the sour cream to the slow cooker.\n2. Cook on low for 6 hours.\n3. Blend about half the soup, stir, and serve topped with sour cream."
+    },
+    {
+      "title": "Overnight Oats",
+      "ingredients": ["½ cup rolled oats", "½ cup milk", "¼ cup yogurt", "1 tbsp maple syrup", "berries, for topping"],
+      "directions": [{ "text": "Stir everything but the berries together in a jar." }, { "text": "Refrigerate overnight; top with berries." }]
+    }
+  ]
+}

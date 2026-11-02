@@ -10,7 +10,14 @@ for _ in {1..30}; do
   sleep 0.5
 done
 
-exec cage -s -- chromium \
+# Raspberry Pi OS Bookworm ships "chromium-browser"; Debian Trixie and others ship "chromium".
+CHROMIUM="$(command -v chromium || command -v chromium-browser || true)"
+if [ -z "$CHROMIUM" ]; then
+  echo "Chromium not found. Install it with: sudo apt install chromium (or chromium-browser)" >&2
+  exit 1
+fi
+
+exec cage -s -- "$CHROMIUM" \
   --kiosk \
   --noerrdialogs \
   --disable-infobars \

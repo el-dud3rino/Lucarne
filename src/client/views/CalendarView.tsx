@@ -11,6 +11,8 @@ import {
   X,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api.js';
+import { DayWeather, useDailyForecast } from '../lib/weather.js';
+import { CATEGORY_STYLES, EVENT_CATEGORIES, type EventCategory } from '../../shared/eventCategories.js';
 import {
   addDays,
   eventOccursOnDay,
@@ -109,14 +111,38 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     enabled: settings.showDinnerOnCalendar,
   });
 
+  const { data: forecast } = useDailyForecast(
+    settings.weatherLat,
+    settings.weatherLon,
+    settings.weatherUnit
+  );
+
+  const hiddenCategories = useMemo(() => {
+    const hidden = new Set<EventCategory>();
+    if (!settings.showBirthdays) hidden.add('birthday');
+    if (!settings.showHolidays) hidden.add('holiday');
+    return hidden;
+  }, [settings.showBirthdays, settings.showHolidays]);
+
   const filteredEvents = useMemo(() => {
-    if (selectedMemberIds.length === 0) return events;
-    return events.filter(
+    const visible = events.filter((ev) => !ev.category || !hiddenCategories.has(ev.category));
+    if (selectedMemberIds.length === 0) return visible;
+    return visible.filter(
       (ev) =>
         ev.memberIds.length === 0 ||
         ev.memberIds.some((id) => selectedMemberIds.includes(id))
     );
-  }, [events, selectedMemberIds]);
+  }, [events, selectedMemberIds, hiddenCategories]);
+
+  // Show/hide birthdays & holidays from the toolbar (remembered in settings).
+  const toggleCategoryMutation = useMutation({
+    mutationFn: (patch: Partial<AppSettings>) =>
+      apiFetch<AppSettings>('/api/settings', { method: 'PUT', body: JSON.stringify(patch) }),
+    onMutate: (patch) => {
+      queryClient.setQueryData<AppSettings>(['settings'], (prev) => (prev ? { ...prev, ...patch } : prev));
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['settings'] }),
+  });
 
   const dinnerByDate = useMemo(() => {
     const map = new Map<string, MealPlanEntry>();
@@ -176,7 +202,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   };
 
   const stepAnchor = (dir: -1 | 1) => {
-    if (subView === 'schedule') setAnchorDate((d) => addDays(d, dir * 4));
+    if (subView === 'schedule') setAnchorDate((d) => addDays(d, dir * 5));
     else if (subView === 'people') setAnchorDate((d) => addDays(d, dir * 1));
     else if (subView === 'week') setAnchorDate((d) => addDays(d, dir * 7));
     else {
@@ -185,6 +211,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   };
 
   const getEventStyle = (ev: CalendarEvent) => {
+    if (ev.category) {
+      const c = CATEGORY_STYLES[ev.category];
+      return { bg: c.bg, text: c.text, accent: c.accent };
+    }
     const primary = ev.memberIds[0] ? memberMap.get(ev.memberIds[0]) : undefined;
     return {
       bg: primary?.colorBg || '#F1F5F9',
@@ -223,6 +253,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             </span>
           )}
           <span className="text-xs font-bold truncate flex-1">
+            {ev.category && <span aria-hidden className="mr-1">{CATEGORY_STYLES[ev.category].icon}</span>}
             {ev.title}
           </span>
           {evMembers.length > 0 && (
@@ -260,6 +291,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       >
         <div className="flex items-start justify-between gap-2">
           <span className="font-bold leading-snug text-sm md:text-[15px]">
+            {ev.category && <span aria-hidden className="mr-1">{CATEGORY_STYLES[ev.category].icon}</span>}
             {ev.title}
           </span>
           {evMembers.length > 0 && (
@@ -333,6 +365,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               {day.toLocaleDateString([], { month: 'short', day: 'numeric' })}
             </div>
           </div>
+
+          <DayWeather forecast={forecast?.get(dayStr)} />
 
           <button
             type="button"
@@ -424,13 +458,41 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 })
               : anchorDate.toLocaleDateString([], { month: 'long', year: 'numeric' })}
           </h2>
+          {subView === 'people' && (
+            <div className="ml-3">
+              <DayWeather forecast={forecast?.get(toDateStr(anchorDate))} />
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
           <div className="bg-stone-200/75 p-1 rounded-2xl flex items-center gap-1">
+            {EVENT_CATEGORIES.map((cat) => {
+              const style = CATEGORY_STYLES[cat];
+              const key = cat === 'birthday' ? 'showBirthdays' : 'showHolidays';
+              const on = settings[key];
+              return (
+                <button
+                  key={cat}
+                  type="button"
+                  aria-pressed={on}
+                  title={`${on ? 'Hide' : 'Show'} ${style.label.toLowerCase()}`}
+                  onClick={() => toggleCategoryMutation.mutate({ [key]: !on })}
+                  className={`h-10 min-h-[40px] min-w-[40px] px-3 rounded-xl text-sm font-bold transition flex items-center gap-1.5 ${
+                    on ? 'bg-white shadow-xs' : 'opacity-50 line-through text-stone-500'
+                  }`}
+                  style={on ? { color: style.text } : undefined}
+                >
+                  <span aria-hidden>{style.icon}</span>
+                  <span className="hidden xl:inline">{style.label}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="bg-stone-200/75 p-1 rounded-2xl flex items-center gap-1">
             {(
               [
-                ['schedule', '4-Day'],
+                ['schedule', '5-Day'],
                 ['people', 'People'],
                 ['week', 'Week'],
                 ['month', 'Month'],
@@ -465,8 +527,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       {/* Main Calendar Grid Area */}
       <div className="flex-1 min-h-0">
         {subView === 'schedule' && (
-          <div className="h-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3.5 overflow-y-auto md:overflow-hidden">
-            {[0, 1, 2, 3].map((offset) => renderDayColumn(addDays(anchorDate, offset), true))}
+          <div className="h-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3.5 overflow-y-auto md:overflow-hidden">
+            {[0, 1, 2, 3, 4].map((offset) => renderDayColumn(addDays(anchorDate, offset), true))}
           </div>
         )}
 
@@ -567,6 +629,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                         }`}
                       >
                         {cellDay.getDate()}
+                      </span>
+                      <span className="ml-auto mr-1">
+                        <DayWeather forecast={forecast?.get(toDateStr(cellDay))} variant="compact" />
                       </span>
                       {dayEvents.length > monthGridInfo.maxEvents && (
                         <span className="text-[11px] font-bold text-stone-400">

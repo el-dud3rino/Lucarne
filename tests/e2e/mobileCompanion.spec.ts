@@ -48,7 +48,7 @@ test('Mobile Companion PWA (390x844): Bottom Nav, Responsive Views & Zero Horizo
     assert.equal(await navButtons.count(), 5, 'Mobile bottom nav bar must contain 5 navigation buttons');
 
     // 3. Check Calendar View on mobile
-    await page.waitForSelector('text=4-Day');
+    await page.waitForSelector('text=5-Day');
     await assertZeroHorizontalOverflow('Mobile Calendar View');
 
     // 4. Navigate to Chores View via bottom nav

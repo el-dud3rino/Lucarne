@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 import { Hono } from 'hono';
 import { db } from '../db/connection.js';
 import { broadcastInvalidate } from '../sse.js';
+import { scheduleKeepSync } from '../services/keepSync.js';
+import { aisleFor, rememberAisle } from '../services/aisles.js';
 import { classifyGroceryItem } from '../../shared/groceryClassifier.js';
 import {
   parseItemInput,
@@ -149,12 +151,9 @@ listsRouter.post('/:id/items', async (c) => {
     const parsed = parseItemInput(rawText);
     text = parsed.text;
     quantity = parsed.quantity;
-    if (!category) {
-      category = parsed.category as GroceryCategory;
-    }
-  } else if (!category) {
-    category = classifyGroceryItem(text);
   }
+  // Aisle: explicit choice, else what this household chose last time, else the keyword rules
+  if (!category) category = aisleFor(text);
 
   const nowIso = new Date().toISOString();
   const normName = normalizeIngredientName(text);
@@ -179,6 +178,7 @@ listsRouter.post('/:id/items', async (c) => {
     ).run(mergedQty, nowIso, String(existing.id));
 
     broadcastInvalidate(['lists']);
+    scheduleKeepSync();
     const updated = db
       .prepare('SELECT * FROM list_items WHERE id = ?')
       .get(String(existing.id)) as Record<string, unknown>;
@@ -202,6 +202,7 @@ listsRouter.post('/:id/items', async (c) => {
   );
 
   broadcastInvalidate(['lists']);
+    scheduleKeepSync();
   const created = db.prepare('SELECT * FROM list_items WHERE id = ?').get(id) as Record<
     string,
     unknown
@@ -218,6 +219,10 @@ listsRouter.put('/items/:itemId', async (c) => {
   if (!existing) return c.json({ error: 'Not found' }, 404);
 
   const nowIso = new Date().toISOString();
+  // Someone moved this item to another aisle: remember it for next time.
+  if (body.category && body.category !== existing.category) {
+    rememberAisle(String(body.text ?? existing.text), body.category);
+  }
   db.prepare(
     `UPDATE list_items
      SET text = ?, quantity = ?, category = ?, checked = ?, updated_at = ?
@@ -232,6 +237,7 @@ listsRouter.put('/items/:itemId', async (c) => {
   );
 
   broadcastInvalidate(['lists']);
+    scheduleKeepSync();
   const updated = db.prepare('SELECT * FROM list_items WHERE id = ?').get(itemId) as Record<
     string,
     unknown
@@ -243,6 +249,7 @@ listsRouter.delete('/items/:itemId', (c) => {
   const itemId = c.req.param('itemId');
   db.prepare('DELETE FROM list_items WHERE id = ?').run(itemId);
   broadcastInvalidate(['lists']);
+    scheduleKeepSync();
   return c.json({ ok: true });
 });
 
@@ -250,5 +257,6 @@ listsRouter.post('/:id/clear-checked', (c) => {
   const listId = c.req.param('id');
   db.prepare('DELETE FROM list_items WHERE list_id = ? AND checked = 1').run(listId);
   broadcastInvalidate(['lists']);
+    scheduleKeepSync();
   return c.json({ ok: true });
 });
