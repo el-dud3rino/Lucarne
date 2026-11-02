@@ -6,6 +6,32 @@ Inspired by the Skylight Calendar, but self-hosted: your family's data lives in 
 
 > **Status:** early and actively developed. Expect rough edges, and please report bugs through GitHub Issues.
 
+![Lucarne 5-day family calendar on a 1080p wall display](docs/screenshots/calendar-5day.jpg)
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/calendar-month.jpg" alt="Month view with birthdays and holidays"><br><sub><b>Month view</b>: birthdays 🎂 and holidays 🎉 in their own colors</sub></td>
+    <td width="50%"><img src="docs/screenshots/chores.jpg" alt="Chores per person with stars"><br><sub><b>Chores</b>: per-person routines and stars</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/groceries.jpg" alt="Grocery list sorted by aisle"><br><sub><b>Groceries</b>: auto-sorted by aisle, in your store's order</sub></td>
+    <td><img src="docs/screenshots/meals.jpg" alt="Weekly meal planner"><br><sub><b>Meal planner</b>: send the week's ingredients to the list</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/cook-mode.jpg" alt="Cook mode"><br><sub><b>Cook Mode</b>: big text, the screen stays awake</sub></td>
+    <td><img src="docs/screenshots/screensaver.jpg" alt="Photo screensaver with clock and next event"><br><sub><b>Screensaver</b>: your photos, the time, weather and what's next</sub></td>
+  </tr>
+</table>
+
+<p>
+  <img src="docs/screenshots/phone-calendar.jpg" alt="Phone companion: calendar" width="240">
+  &nbsp;
+  <img src="docs/screenshots/phone-groceries.jpg" alt="Phone companion: grocery list" width="240">
+  <br><sub><b>Phone companion</b>: the same app on any phone on your Wi-Fi</sub>
+</p>
+
+<sub>Screenshots show a fictional demo household (<code>npm run demo:seed</code>).</sub>
+
 ---
 
 ## Contents
@@ -212,6 +238,7 @@ Settings live in `.env` (copy `.env.example`). Google and Gemini keys can also b
 | `GEMINI_MODEL` | automatic | Pin one Gemini model instead of automatic selection. |
 | `GEMINI_PAID_TIER` | off | Set to `1` to disable Lucarne's free-tier request limits (billing-enabled keys). |
 | `KEEP_PYTHON` | `python3` (`python` on Windows) | Python used to create the Keep helper's environment, if not the default. |
+| `TZ` | system time zone | Time zone for repeating events and "today" (for example `America/Denver`). Normally just set the device's time zone instead. |
 
 ## Installing on a Raspberry Pi (wall display)
 
@@ -225,7 +252,9 @@ sudo apt install -y git curl cage chromium fonts-noto-color-emoji python3-venv
 curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
 sudo apt install -y nodejs
 node -v   # should print v24.x
+timedatectl              # check the time zone; fix with: sudo raspi-config → Localisation → Timezone
 ```
+The device's time zone matters: repeating events and "today" (chores, meals) use it.
 
 ### 2. Get Lucarne and build it
 ```bash
@@ -310,6 +339,11 @@ npm run typecheck
 npm test               # unit + integration + latency benchmarks
 npm run test:e2e       # builds, then runs real-browser tests at 1920×1080 and phone size (uses Microsoft Edge via Playwright)
 npm run import:meals -- ./meals.json
+
+# Fictional demo household + README screenshots (never touches your real data/)
+npm run demo:seed -- --fresh   # builds ./demo-data (git-ignored); dates are relative to today
+npm run build && npm run demo:screenshots   # writes docs/screenshots/*.jpg
+DATA_DIR=./demo-data PORT=3002 npm start     # browse the demo yourself
 ```
 
 Tests never touch real Google services or recipe sites. They run against local mock servers (Google OAuth/Calendar/Photos, Gemini, Keep, shared albums, recipe pages) and use a throwaway data folder, never your real `data/`.

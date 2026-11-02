@@ -465,8 +465,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           )}
         </div>
 
-        <div className="flex items-center gap-2">
-          <div className="bg-stone-200/75 p-1 rounded-2xl flex items-center gap-1">
+        <div className="flex items-center gap-2 max-w-full overflow-x-auto">
+          <div className="bg-stone-200/75 p-1 rounded-2xl flex items-center gap-1 shrink-0">
             {EVENT_CATEGORIES.map((cat) => {
               const style = CATEGORY_STYLES[cat];
               const key = cat === 'birthday' ? 'showBirthdays' : 'showHolidays';
@@ -489,7 +489,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               );
             })}
           </div>
-          <div className="bg-stone-200/75 p-1 rounded-2xl flex items-center gap-1">
+          <div className="bg-stone-200/75 p-1 rounded-2xl flex items-center gap-1 shrink-0">
             {(
               [
                 ['schedule', '5-Day'],
@@ -502,7 +502,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 key={key}
                 type="button"
                 onClick={() => setSubView(key)}
-                className={`h-10 min-h-[40px] px-3.5 py-2 rounded-xl text-sm font-bold transition flex items-center justify-center ${
+                className={`h-10 min-h-[40px] px-3.5 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition flex items-center justify-center ${
                   subView === key
                     ? 'bg-white text-slate-900 shadow-xs'
                     : 'text-stone-600 hover:text-slate-900'
@@ -527,13 +527,13 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       {/* Main Calendar Grid Area */}
       <div className="flex-1 min-h-0">
         {subView === 'schedule' && (
-          <div className="h-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3.5 overflow-y-auto md:overflow-hidden">
+          <div className="h-full grid grid-cols-1 auto-rows-max md:auto-rows-auto md:grid-cols-2 lg:grid-cols-5 gap-3.5 overflow-y-auto md:overflow-hidden">
             {[0, 1, 2, 3, 4].map((offset) => renderDayColumn(addDays(anchorDate, offset), true))}
           </div>
         )}
 
         {subView === 'week' && (
-          <div className="h-full grid grid-cols-1 md:grid-cols-7 gap-2.5 overflow-y-auto md:overflow-hidden">
+          <div className="h-full grid grid-cols-1 auto-rows-max md:auto-rows-auto md:grid-cols-7 gap-2.5 overflow-y-auto md:overflow-hidden">
             {[0, 1, 2, 3, 4, 5, 6].map((offset) =>
               renderDayColumn(addDays(startOfWeek(anchorDate, 0), offset), false)
             )}

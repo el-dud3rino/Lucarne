@@ -110,6 +110,45 @@ export const App: React.FC = () => {
     { key: 'settings', label: 'Settings', Icon: SettingsIcon },
   ];
 
+
+  /** Tap-to-filter family member chips (shared by the wall header and the phone row). */
+  const renderMemberFilter = (className: string) => (
+    <div className={`flex items-center gap-1.5 overflow-x-auto py-1 ${className}`}>
+      {selectedMemberIds.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setSelectedMemberIds([])}
+          className="h-10 min-h-[40px] px-3.5 rounded-full bg-stone-200 text-xs font-extrabold text-slate-700 shrink-0 flex items-center justify-center"
+        >
+          All
+        </button>
+      )}
+      {members.map((m) => {
+        const isSelected =
+          selectedMemberIds.length === 0 || selectedMemberIds.includes(m.id);
+        return (
+          <button
+            key={m.id}
+            type="button"
+            onClick={() => toggleMemberFilter(m.id)}
+            style={{
+              backgroundColor: m.colorBg,
+              color: m.colorText,
+              borderColor:
+                selectedMemberIds.includes(m.id) ? m.colorAccent : 'transparent',
+            }}
+            className={`h-10 min-h-[40px] min-w-[40px] px-3 rounded-full border-2 flex items-center gap-1.5 font-extrabold text-sm shrink-0 transition active:scale-95 ${
+              isSelected ? 'opacity-100 shadow-2xs' : 'opacity-35 grayscale'
+            }`}
+          >
+            <span>{m.emoji}</span>
+            <span className="member-name hidden lg:inline">{m.name}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+
   return (
     <div className="h-screen w-screen overflow-hidden flex flex-col md:flex-row bg-[#FAF8F5] text-slate-800">
       {/* Skylight-Inspired Left Navigation Rail (1080p Landscape Desktop/Kiosk) */}
@@ -168,43 +207,8 @@ export const App: React.FC = () => {
             />
           </div>
 
-          {/* Tap-to-Filter Family Member Avatars */}
-          {(activeTab === 'calendar' || activeTab === 'chores') && (
-            <div className="flex items-center gap-1.5 overflow-x-auto py-1">
-              {selectedMemberIds.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setSelectedMemberIds([])}
-                  className="h-10 min-h-[40px] px-3.5 rounded-full bg-stone-200 text-xs font-extrabold text-slate-700 shrink-0 flex items-center justify-center"
-                >
-                  All
-                </button>
-              )}
-              {members.map((m) => {
-                const isSelected =
-                  selectedMemberIds.length === 0 || selectedMemberIds.includes(m.id);
-                return (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => toggleMemberFilter(m.id)}
-                    style={{
-                      backgroundColor: m.colorBg,
-                      color: m.colorText,
-                      borderColor:
-                        selectedMemberIds.includes(m.id) ? m.colorAccent : 'transparent',
-                    }}
-                    className={`h-10 min-h-[40px] min-w-[40px] px-3 rounded-full border-2 flex items-center gap-1.5 font-extrabold text-sm shrink-0 transition active:scale-95 ${
-                      isSelected ? 'opacity-100 shadow-2xs' : 'opacity-35 grayscale'
-                    }`}
-                  >
-                    <span>{m.emoji}</span>
-                    <span className="hidden lg:inline">{m.name}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          {/* Tap-to-Filter Family Member Avatars (wall/tablet: in the header) */}
+          {(activeTab === 'calendar' || activeTab === 'chores') && renderMemberFilter('hidden md:flex')}
 
           {/* Right Clock & Weather Pill */}
           <div className="flex items-center gap-3 shrink-0">
@@ -223,6 +227,13 @@ export const App: React.FC = () => {
             </div>
           </div>
         </header>
+
+        {/* Phones: family filter on its own row so the household name isn't squeezed */}
+        {(activeTab === 'calendar' || activeTab === 'chores') && (
+          <div className="md:hidden shrink-0 px-4 pt-2 border-b border-stone-200/60 bg-[#FAF8F5]">
+            {renderMemberFilter('pb-2 [&_.member-name]:inline')}
+          </div>
+        )}
 
         {/* Active View Canvas */}
         <main className="flex-1 min-h-0 p-3.5 md:p-5 overflow-hidden">

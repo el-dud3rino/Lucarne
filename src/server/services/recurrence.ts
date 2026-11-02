@@ -3,16 +3,25 @@ import type { CalendarEvent } from '../../shared/types.js';
 const DAY_MS = 86_400_000;
 const MAX_INSTANCES_PER_EVENT = 500;
 
+/** YYYY-MM-DD in local time (the household's time zone). */
+function localDateStr(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 /**
  * Expands a recurring CalendarEvent into virtual instances within the specified ISO date window.
  * Supports 'daily', 'weekly', 'biweekly', and 'monthly' recurrence cadences.
  *
+ * Occurrences keep the same LOCAL clock time (e.g. "every Tuesday at 4:00 PM"), so they don't shift
+ * by an hour when daylight saving time starts or ends. Date math is done in the device's local time
+ * zone (set TZ for the server process if the device's system time zone is wrong).
+ *
  * Each virtual instance receives:
- * - id: `${event.id}_${instanceDateStr}` (where instanceDateStr is YYYY-MM-DD)
+ * - id: `${event.id}_${instanceDateStr}` (instanceDateStr = local YYYY-MM-DD of the occurrence)
  * - originalEventId: event.id
  * - isRecurringInstance: true
  * - recurrenceRule: event.recurrenceRule
- * - startIso & endIso projected to the occurrence date while preserving time-of-day and duration.
+ * - startIso & endIso projected to the occurrence date while preserving local time-of-day and duration.
  */
 export function expandRecurringEvent(
   event: CalendarEvent,
@@ -40,105 +49,69 @@ export function expandRecurringEvent(
   const exceptionSet = new Set(event.exceptionDates || []);
   const instances: CalendarEvent[] = [];
 
-  const baseHours = baseStart.getUTCHours();
-  const baseMinutes = baseStart.getUTCMinutes();
-  const baseSeconds = baseStart.getUTCSeconds();
-  const baseMs = baseStart.getUTCMilliseconds();
+  const push = (instStart: Date) => {
+    const startMs = instStart.getTime();
+    const endMs = startMs + durationMs;
+    if (endMs < winStart || startMs > winEnd) return;
+    const dateStr = localDateStr(instStart);
+    if (exceptionSet.has(dateStr)) return;
+    instances.push({
+      ...event,
+      id: `${event.id}_${dateStr}`,
+      originalEventId: event.id,
+      isRecurringInstance: true,
+      recurrenceRule: event.recurrenceRule,
+      startIso: instStart.toISOString(),
+      endIso: new Date(endMs).toISOString(),
+    });
+  };
 
   const rule = event.recurrenceRule;
 
   if (rule === 'daily' || rule === 'weekly' || rule === 'biweekly') {
     const stepDays = rule === 'daily' ? 1 : rule === 'weekly' ? 7 : 14;
-    const stepMs = stepDays * DAY_MS;
+    // Calendar-day steps in local time keep the clock time fixed across DST changes.
+    const occurrence = (n: number) => {
+      const d = new Date(baseStart);
+      d.setDate(d.getDate() + n * stepDays);
+      return d;
+    };
 
-    let curStartMs = baseStart.getTime();
-
-    // Fast-forward past occurrences if baseStart is far before windowStart
-    if (curStartMs + durationMs < winStart) {
-      const skip = Math.floor((winStart - (curStartMs + durationMs)) / stepMs);
-      if (skip > 0) {
-        curStartMs += skip * stepMs;
-      }
+    // Fast-forward close to the window (one step early to be safe around DST).
+    let n = 0;
+    if (baseStart.getTime() + durationMs < winStart) {
+      n = Math.max(0, Math.floor((winStart - (baseStart.getTime() + durationMs)) / (stepDays * DAY_MS)) - 1);
     }
 
-    let iterations = 0;
-    while (curStartMs <= winEnd && iterations < MAX_INSTANCES_PER_EVENT) {
-      iterations++;
-      const curEndMs = curStartMs + durationMs;
-
-      if (curEndMs >= winStart && curStartMs <= winEnd) {
-        const instStart = new Date(curStartMs);
-        const instEnd = new Date(curEndMs);
-        const dateStr = instStart.toISOString().slice(0, 10);
-
-        if (!exceptionSet.has(dateStr)) {
-          instances.push({
-            ...event,
-            id: `${event.id}_${dateStr}`,
-            originalEventId: event.id,
-            isRecurringInstance: true,
-            recurrenceRule: event.recurrenceRule,
-            startIso: instStart.toISOString(),
-            endIso: instEnd.toISOString(),
-          });
-        }
-      }
-
-      curStartMs += stepMs;
+    for (let iterations = 0; iterations < MAX_INSTANCES_PER_EVENT; iterations++, n++) {
+      const instStart = occurrence(n);
+      if (instStart.getTime() > winEnd) break;
+      push(instStart);
     }
   } else if (rule === 'monthly') {
-    const targetDay = baseStart.getUTCDate();
-    let curYear = baseStart.getUTCFullYear();
-    let curMonth = baseStart.getUTCMonth();
+    const targetDay = baseStart.getDate();
+    const h = baseStart.getHours();
+    const m = baseStart.getMinutes();
+    const s = baseStart.getSeconds();
+    const ms = baseStart.getMilliseconds();
+    let curYear = baseStart.getFullYear();
+    let curMonth = baseStart.getMonth();
 
     // Fast-forward months if baseStart is far in the past
     const winStartDate = new Date(winStart);
-    const monthDiff =
-      (winStartDate.getUTCFullYear() - curYear) * 12 +
-      (winStartDate.getUTCMonth() - curMonth);
+    const monthDiff = (winStartDate.getFullYear() - curYear) * 12 + (winStartDate.getMonth() - curMonth);
     if (monthDiff > 1) {
-      const advance = monthDiff - 1;
-      curYear += Math.floor(advance / 12);
-      curMonth += advance % 12;
-      if (curMonth > 11) {
-        curYear += Math.floor(curMonth / 12);
-        curMonth = curMonth % 12;
-      }
+      const target = curMonth + monthDiff - 1;
+      curYear += Math.floor(target / 12);
+      curMonth = target % 12;
     }
 
-    let iterations = 0;
-    while (iterations < MAX_INSTANCES_PER_EVENT) {
-      iterations++;
-
+    for (let iterations = 0; iterations < MAX_INSTANCES_PER_EVENT; iterations++) {
       // Month-end clamping: e.g. Jan 31 in Feb -> Feb 28 or Feb 29 (leap year safe)
-      const daysInMonth = new Date(Date.UTC(curYear, curMonth + 1, 0)).getUTCDate();
-      const actualDay = Math.min(targetDay, daysInMonth);
-
-      const instStart = new Date(
-        Date.UTC(curYear, curMonth, actualDay, baseHours, baseMinutes, baseSeconds, baseMs)
-      );
-      const curStartMs = instStart.getTime();
-
-      if (curStartMs > winEnd) {
-        break;
-      }
-
-      const curEndMs = curStartMs + durationMs;
-      if (curEndMs >= winStart && curStartMs <= winEnd) {
-        const dateStr = instStart.toISOString().slice(0, 10);
-
-        if (!exceptionSet.has(dateStr)) {
-          instances.push({
-            ...event,
-            id: `${event.id}_${dateStr}`,
-            originalEventId: event.id,
-            isRecurringInstance: true,
-            recurrenceRule: event.recurrenceRule,
-            startIso: instStart.toISOString(),
-            endIso: new Date(curEndMs).toISOString(),
-          });
-        }
-      }
+      const daysInMonth = new Date(curYear, curMonth + 1, 0).getDate();
+      const instStart = new Date(curYear, curMonth, Math.min(targetDay, daysInMonth), h, m, s, ms);
+      if (instStart.getTime() > winEnd) break;
+      push(instStart);
 
       curMonth++;
       if (curMonth > 11) {

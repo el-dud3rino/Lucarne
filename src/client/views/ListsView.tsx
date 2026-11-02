@@ -367,12 +367,12 @@ export const ListsView: React.FC = () => {
         <div className="flex-1 flex flex-col bg-white rounded-3xl border border-stone-200/90 shadow-2xs overflow-hidden min-h-0">
           {/* Quick Entry Bar */}
           <div className="p-4 border-b border-stone-100 space-y-3 bg-stone-50/40">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
                 <span className="text-2xl">{activeList.emoji}</span>
-                <h2 className="text-xl font-extrabold text-slate-800">{activeList.name}</h2>
+                <h2 className="text-xl font-extrabold text-slate-800 truncate">{activeList.name}</h2>
                 {activeList.isGrocery && (
-                  <span className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
+                  <span className="hidden sm:inline-flex text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full whitespace-nowrap">
                     Grocery Auto-Sort
                   </span>
                 )}
@@ -386,7 +386,7 @@ export const ListsView: React.FC = () => {
                   title="Arrange aisles in your store's order"
                 >
                   <ListOrdered className="w-4 h-4 text-stone-500" />
-                  <span>Store order</span>
+                  <span className="hidden sm:inline">Store order</span>
                 </button>
               )}
               <button
@@ -396,7 +396,7 @@ export const ListsView: React.FC = () => {
                 title="Edit List"
               >
                 <Settings2 className="w-4 h-4 text-stone-500" />
-                <span>Manage List</span>
+                <span className="hidden sm:inline">Manage List</span>
               </button>
               </div>
             </div>

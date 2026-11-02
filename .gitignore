@@ -14,3 +14,6 @@ playwright-report/
 # Google Keep bridge virtualenv
 keep-bridge/.venv/
 __pycache__/
+
+# Demo household for screenshots (npm run demo:seed)
+demo-data/
