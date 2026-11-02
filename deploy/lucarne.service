@@ -1,0 +1,18 @@
+[Unit]
+Description=Lucarne Local-First Family Hub Server
+After=network.target
+
+[Service]
+Type=simple
+User=lucarne
+WorkingDirectory=/opt/lucarne
+Environment=NODE_ENV=production
+Environment=PORT=3001
+Environment=DATA_DIR=/opt/lucarne/data
+ExecStart=/usr/bin/node --no-warnings /opt/lucarne/dist/server/server/index.js
+Restart=always
+RestartSec=2
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

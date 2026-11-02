@@ -1,0 +1,49 @@
+{
+  "name": "lucarne",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fast, local-first open-source family calendar, chore tracker, grocery list, and meal planner for 1080p touchscreens.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n SERVER,CLIENT -c cyan,magenta \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "tsx watch src/server/index.ts",
+    "dev:client": "vite",
+    "build": "vite build && tsc -p tsconfig.server.json",
+    "start": "node --no-warnings dist/server/server/index.js",
+    "import:meals": "tsx scripts/import-meals.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run test:unit && npm run test:integration && npm run test:benchmarks",
+    "test:unit": "node --import tsx --test tests/unit/*.test.ts",
+    "test:integration": "node --import tsx --test tests/integration/*.test.ts",
+    "test:benchmarks": "node --import tsx --test tests/benchmarks/*.test.ts",
+    "test:e2e": "npm run build && node --import tsx --test --test-concurrency=1 tests/e2e/*.spec.ts",
+    "test:all": "npm run test && npm run test:e2e"
+  },
+  "dependencies": {
+    "@google/genai": "^1.0.0",
+    "@hono/node-server": "^1.14.0",
+    "@tanstack/react-query": "^5.66.0",
+    "cheerio": "^1.0.0",
+    "dotenv": "^16.4.7",
+    "hono": "^4.7.0",
+    "lucide-react": "^0.475.0",
+    "playwright": "^1.64.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.6",
+    "@types/node": "^22.13.4",
+    "@types/react": "^19.0.8",
+    "@types/react-dom": "^19.0.3",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "tailwindcss": "^4.0.6",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vite": "^6.1.0"
+  }
+}

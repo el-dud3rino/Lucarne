@@ -1,0 +1,10 @@
+{
+  "name": "Lucarne Family Hub",
+  "short_name": "Lucarne",
+  "description": "Local-first family calendar, chores, grocery lists, and meal planner",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FAF8F5",
+  "theme_color": "#FAF8F5",
+  "orientation": "any"
+}

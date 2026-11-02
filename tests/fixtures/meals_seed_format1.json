@@ -1,0 +1,112 @@
+[
+  {
+    "title": "Mediterranean Lemon Herb Salmon",
+    "description": "Pan-seared salmon with cherry tomatoes, kalamata olives, capers, and fresh dill.",
+    "imageUrl": "https://images.example.com/salmon-dish.jpg",
+    "sourceUrl": "https://example.com/mediterranean-salmon",
+    "prepMinutes": 10,
+    "cookMinutes": 15,
+    "servings": 4,
+    "tags": ["Seafood", "Mediterranean", "Keto", "Quick"],
+    "ingredients": [
+      {
+        "name": "Salmon Fillets",
+        "quantity": 1.5,
+        "unit": "lbs",
+        "notes": "skin-on",
+        "category": "Meat & Seafood"
+      },
+      {
+        "name": "Cherry Tomatoes",
+        "quantity": 1,
+        "unit": "pint",
+        "notes": "halved",
+        "category": "Produce"
+      },
+      {
+        "name": "Kalamata Olives",
+        "quantity": 0.5,
+        "unit": "cup",
+        "notes": "pitted",
+        "category": "Pantry"
+      },
+      {
+        "name": "Olive Oil",
+        "quantity": 2,
+        "unit": "tbsp",
+        "notes": "extra virgin",
+        "category": "Pantry"
+      },
+      {
+        "name": "Lemon",
+        "quantity": 1,
+        "unit": "whole",
+        "notes": "sliced into wheels",
+        "category": "Produce"
+      }
+    ],
+    "instructions": [
+      "Pat salmon fillets dry and season generously with salt and pepper.",
+      "Heat olive oil in a stainless steel skillet over medium-high heat.",
+      "Sear salmon skin-side up for 4 minutes, flip carefully, and scatter cherry tomatoes and olives around the fillets.",
+      "Cook for another 4-5 minutes until salmon flakes easily with a fork.",
+      "Garnish with fresh dill and serve warm with lemon slices."
+    ],
+    "favorite": true
+  },
+  {
+    "title": "Crispy Tofu Vegetable Stir-Fry",
+    "description": "Golden cubes of extra-firm tofu tossed with snap peas, bell peppers, and savory sesame ginger sauce.",
+    "imageUrl": "https://images.example.com/tofu-stirfry.jpg",
+    "sourceUrl": null,
+    "prepMinutes": 15,
+    "cookMinutes": 12,
+    "servings": 4,
+    "tags": ["Vegetarian", "Vegan", "Quick", "Stir-Fry"],
+    "ingredients": [
+      {
+        "name": "Extra Firm Tofu",
+        "quantity": 14,
+        "unit": "oz",
+        "notes": "pressed and cubed",
+        "category": "Produce"
+      },
+      {
+        "name": "Sugar Snap Peas",
+        "quantity": 1,
+        "unit": "cup",
+        "notes": "trimmed",
+        "category": "Produce"
+      },
+      {
+        "name": "Red Bell Pepper",
+        "quantity": 1,
+        "unit": "large",
+        "notes": "sliced into strips",
+        "category": "Produce"
+      },
+      {
+        "name": "Soy Sauce",
+        "quantity": 3,
+        "unit": "tbsp",
+        "notes": "low sodium",
+        "category": "Pantry"
+      },
+      {
+        "name": "Sesame Oil",
+        "quantity": 1,
+        "unit": "tbsp",
+        "notes": "toasted",
+        "category": "Pantry"
+      }
+    ],
+    "instructions": [
+      "Toss cubed tofu with cornstarch and a pinch of salt.",
+      "Heat 1 tbsp oil in a wok or large nonstick skillet; fry tofu for 6-8 minutes until crisp and golden on all sides, then remove.",
+      "Add vegetables to the pan and stir-fry over high heat for 3-4 minutes until tender-crisp.",
+      "Whisk soy sauce, sesame oil, and minced ginger; pour into skillet with tofu and toss until glossy.",
+      "Serve over steamed jasmine rice."
+    ],
+    "favorite": false
+  }
+]

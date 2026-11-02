@@ -1,0 +1,102 @@
+{
+  "recipes": [
+    {
+      "meal": "Sunday Pot Roast & Carrots",
+      "summary": "Melt-in-your-mouth slow-braised chuck roast with caramelized carrots and rich brown gravy.",
+      "image": "https://images.example.com/pot-roast.jpg",
+      "url": "https://example.com/sunday-pot-roast",
+      "prep_time": "PT15M",
+      "cook_time": "PT180M",
+      "yield": "6 servings",
+      "category": "Comfort Food",
+      "favorite": true,
+      "items": [
+        {
+          "item": "Beef Chuck Roast",
+          "amount": 3,
+          "unit": "lbs",
+          "notes": "well-marbled",
+          "category": "Meat & Seafood"
+        },
+        {
+          "item": "Carrots",
+          "amount": 6,
+          "unit": "whole",
+          "notes": "cut into 2-inch chunks",
+          "category": "Produce"
+        },
+        {
+          "item": "Beef Broth",
+          "amount": 2,
+          "unit": "cups",
+          "notes": "unsalted",
+          "category": "Pantry"
+        },
+        {
+          "item": "Yellow Onion",
+          "amount": 2,
+          "unit": "medium",
+          "notes": "quartered",
+          "category": "Produce"
+        }
+      ],
+      "directions": [
+        "Preheat oven to 300°F (150°C).",
+        "Generously season chuck roast on all sides with salt and cracked pepper.",
+        "Sear meat in a heavy Dutch oven until a deep mahogany crust forms on both sides.",
+        "Add onion, carrots, and beef broth; cover tightly with heavy lid.",
+        "Bake in oven for 3 hours until roast falls apart when pressed with a fork.",
+        "Skim fat from cooking liquid, thicken with a cornstarch slurry if desired, and spoon over carved roast."
+      ]
+    },
+    {
+      "meal": "Homemade Margherita Pizza",
+      "summary": "Crisp Neapolitan-style thin crust topped with San Marzano tomatoes, fresh mozzarella, and sweet basil.",
+      "image": "https://images.example.com/margherita-pizza.jpg",
+      "url": null,
+      "prep_time": "PT20M",
+      "cook_time": "PT10M",
+      "yield": "4 servings",
+      "category": "Italian",
+      "favorite": true,
+      "items": [
+        {
+          "item": "Pizza Dough Ball",
+          "amount": 1,
+          "unit": "lb",
+          "notes": "room temperature",
+          "category": "Bakery"
+        },
+        {
+          "item": "Crushed San Marzano Tomatoes",
+          "amount": 1,
+          "unit": "cup",
+          "notes": "seasoned with salt",
+          "category": "Pantry"
+        },
+        {
+          "item": "Fresh Mozzarella",
+          "amount": 8,
+          "unit": "oz",
+          "notes": "torn into chunks",
+          "category": "Dairy & Eggs"
+        },
+        {
+          "item": "Fresh Basil Leaves",
+          "amount": 1,
+          "unit": "bunch",
+          "notes": "",
+          "category": "Produce"
+        }
+      ],
+      "directions": [
+        "Place pizza stone or heavy baking sheet in oven and preheat to highest temperature (500°F / 260°C).",
+        "Stretch pizza dough on parchment paper to a 12-inch circle.",
+        "Spread crushed tomatoes in a thin layer, leaving a 1/2-inch border for the crust.",
+        "Distribute mozzarella pieces evenly across the sauce.",
+        "Bake for 8-10 minutes until crust is blistered and cheese is melted with golden spots.",
+        "Top immediately with fresh basil leaves and a drizzle of extra virgin olive oil."
+      ]
+    }
+  ]
+}
