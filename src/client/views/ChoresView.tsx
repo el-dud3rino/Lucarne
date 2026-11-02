@@ -305,7 +305,7 @@ export const ChoresView: React.FC<ChoresViewProps> = ({ members, selectedMemberI
                 title: '',
                 emoji: '✨',
                 assignedMemberId: visibleMembers[0]?.id ?? null,
-                timeOfDay: 'morning',
+                timeOfDay: 'anytime',
                 frequency: 'daily',
                 daysOfWeek: [],
                 stars: 1,
@@ -595,7 +595,7 @@ const ChoreModal: React.FC<ChoreModalProps> = ({
   const [assignedMemberId, setAssignedMemberId] = useState<string | null>(
     draft.assignedMemberId ?? null
   );
-  const [timeOfDay, setTimeOfDay] = useState<ChoreTimeOfDay>(draft.timeOfDay || 'morning');
+  const [timeOfDay, setTimeOfDay] = useState<ChoreTimeOfDay>(draft.timeOfDay || 'anytime');
   const [frequency, setFrequency] = useState<ChoreFrequency>(draft.frequency || 'daily');
   const [daysOfWeek, setDaysOfWeek] = useState<number[]>(draft.daysOfWeek || []);
   const [specificDate, setSpecificDate] = useState<string>(

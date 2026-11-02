@@ -143,6 +143,8 @@ export const OnScreenKeyboard: React.FC<OnScreenKeyboardProps> = ({ enabled }) =
     };
   }, []);
 
+  const lastTapRef = useRef<{ el: Element | null; time: number }>({ el: null, time: 0 });
+
   useEffect(() => {
     if (!enabled) {
       stopRepeat();
@@ -151,36 +153,52 @@ export const OnScreenKeyboard: React.FC<OnScreenKeyboardProps> = ({ enabled }) =
       return;
     }
 
-    const handleFocusIn = (e: FocusEvent) => {
+    const nonTextTypes = new Set([
+      'checkbox',
+      'radio',
+      'file',
+      'color',
+      'range',
+      'date',
+      'time',
+      'datetime-local',
+      'button',
+      'submit',
+    ]);
+    const asTextField = (el: unknown): HTMLInputElement | HTMLTextAreaElement | null => {
+      if (el instanceof HTMLInputElement) {
+        return nonTextTypes.has(el.type) || el.readOnly || el.disabled ? null : el;
+      }
+      if (el instanceof HTMLTextAreaElement) return el.readOnly || el.disabled ? null : el;
+      return null;
+    };
+    const open = (el: HTMLInputElement | HTMLTextAreaElement) => {
+      setTarget(el);
+      setPreviewVal(el.value);
+      setNumMode(el instanceof HTMLInputElement && el.type === 'number');
+      setShifted(el.value.length === 0);
+    };
+
+    // Only open for a deliberate tap/click on a text box, never because a form focused a field by
+    // itself (e.g. the New Event title auto-focuses when the form opens).
+    const handlePointerDown = (e: PointerEvent) => {
       // Suppress on mobile companion (<768px) so native iOS/Android keyboard handles input cleanly
       if (window.innerWidth < 768) return;
+      const t = e.target as Element | null;
+      const el = asTextField(t?.closest?.('input, textarea') ?? (t?.closest?.('label') as HTMLLabelElement | null)?.control);
+      if (!el) return;
+      lastTapRef.current = { el, time: Date.now() };
+      // Tapping a field that already has focus (e.g. after "Hide") brings the keyboard back.
+      if (document.activeElement === el) open(el);
+    };
 
-      const el = e.target;
-      if (el instanceof HTMLInputElement) {
-        const nonTextTypes = new Set([
-          'checkbox',
-          'radio',
-          'file',
-          'color',
-          'range',
-          'date',
-          'time',
-          'datetime-local',
-          'button',
-          'submit',
-        ]);
-        if (nonTextTypes.has(el.type) || el.readOnly || el.disabled) return;
-        setTarget(el);
-        setPreviewVal(el.value);
-        setNumMode(el.type === 'number');
-        setShifted(el.value.length === 0);
-      } else if (el instanceof HTMLTextAreaElement) {
-        if (el.readOnly || el.disabled) return;
-        setTarget(el);
-        setPreviewVal(el.value);
-        setNumMode(false);
-        setShifted(el.value.length === 0);
-      }
+    const handleFocusIn = (e: FocusEvent) => {
+      if (window.innerWidth < 768) return;
+      const el = asTextField(e.target);
+      if (!el) return;
+      const tap = lastTapRef.current;
+      if (tap.el !== el || Date.now() - tap.time > 1500) return;
+      open(el);
     };
 
     const handleInput = (e: Event) => {
@@ -210,11 +228,13 @@ export const OnScreenKeyboard: React.FC<OnScreenKeyboardProps> = ({ enabled }) =
       setTarget(null);
     };
 
+    document.addEventListener('pointerdown', handlePointerDown, true);
     document.addEventListener('focusin', handleFocusIn);
     document.addEventListener('input', handleInput);
     document.addEventListener('focusout', handleFocusOut);
     document.addEventListener('submit', handleSubmit, true);
     return () => {
+      document.removeEventListener('pointerdown', handlePointerDown, true);
       document.removeEventListener('focusin', handleFocusIn);
       document.removeEventListener('input', handleInput);
       document.removeEventListener('focusout', handleFocusOut);

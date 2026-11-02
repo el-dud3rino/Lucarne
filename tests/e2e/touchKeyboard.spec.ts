@@ -32,10 +32,15 @@ test('Touch Keyboard: Kiosk 1080p Virtual Keyboard & Mobile Suppression', async 
     const doneBtn = kioskPage.locator('button:has-text("Done")');
     assert.equal(await doneBtn.isVisible(), false, 'Keyboard should not be visible before focus');
 
-    // Focus input
+    // Focusing a field without a tap (e.g. a form auto-focusing it) must NOT open the keyboard
     await groceryInput.focus();
+    await kioskPage.waitForTimeout(300);
+    assert.equal(await doneBtn.isVisible(), false, 'Keyboard must not open for programmatic focus');
+
+    // Tapping the field opens it
+    await groceryInput.click();
     await doneBtn.waitFor({ state: 'visible', timeout: 3000 });
-    assert.equal(await doneBtn.isVisible(), true, 'Virtual keyboard should appear on focus in kiosk mode');
+    assert.equal(await doneBtn.isVisible(), true, 'Virtual keyboard should appear when the field is tapped');
 
     // Verify Quick Chips are displayed in keyboard top preview bar
     const breadChip = kioskPage.locator('div.fixed button', { hasText: 'Bread' });
@@ -125,6 +130,12 @@ test('Touch Keyboard: Kiosk 1080p Virtual Keyboard & Mobile Suppression', async 
     await kioskPage.waitForTimeout(300);
     assert.equal(await doneBtn.isVisible(), false, 'Keyboard should be hidden after clicking Hide');
 
+    // Tapping the (still focused) field again brings the keyboard back
+    await groceryInput.click();
+    await doneBtn.waitFor({ state: 'visible', timeout: 3000 });
+    await hideBtn.click();
+    await kioskPage.waitForTimeout(300);
+
     // ---------------------------------------------------------
     // 2. MODAL AUTO-SCROLL & NON-OBSCURING CHECK (1920x1080)
     // ---------------------------------------------------------
@@ -132,10 +143,12 @@ test('Touch Keyboard: Kiosk 1080p Virtual Keyboard & Mobile Suppression', async 
     await kioskPage.waitForSelector('text=5-Day');
     await kioskPage.locator('button:has-text("Add Event")').click();
     await kioskPage.waitForSelector('text=Add Family Event');
+    await kioskPage.waitForTimeout(300);
+    assert.equal(await doneBtn.isVisible(), false, 'Opening a form that auto-focuses its title must not open the keyboard');
 
     const notesInput = kioskPage.locator('input[placeholder*="Notes"]');
     await notesInput.scrollIntoViewIfNeeded();
-    await notesInput.focus();
+    await notesInput.click();
     await doneBtn.waitFor({ state: 'visible', timeout: 3000 });
     await kioskPage.waitForTimeout(300);
 
@@ -183,7 +196,7 @@ test('Touch Keyboard: Kiosk 1080p Virtual Keyboard & Mobile Suppression', async 
     await tabletPage.waitForSelector('text=Groceries');
 
     const tabletGroceryInput = tabletPage.locator('input[placeholder*="auto-sorts"]');
-    await tabletGroceryInput.focus();
+    await tabletGroceryInput.click();
     const tabletDoneBtn = tabletPage.locator('div.fixed button:has-text("Done")');
     await tabletDoneBtn.waitFor({ state: 'visible', timeout: 3000 });
     assert.equal(
@@ -210,7 +223,7 @@ test('Touch Keyboard: Kiosk 1080p Virtual Keyboard & Mobile Suppression', async 
     // Focus grocery input on mobile
     const mobileGroceryInput = mobilePage.locator('input[placeholder*="auto-sorts"]');
     await mobileGroceryInput.waitFor({ state: 'visible' });
-    await mobileGroceryInput.focus();
+    await mobileGroceryInput.click();
     await mobilePage.waitForTimeout(500);
 
     // On mobile (<768px), OnScreenKeyboard must NOT appear (suppressed for native keyboard)

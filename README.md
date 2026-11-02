@@ -16,6 +16,7 @@ Inspired by the Skylight Calendar, but self-hosted: your family's data lives in 
 - [Quick start (try it on your computer)](#quick-start-try-it-on-your-computer)
 - [Google Calendar & Photos setup](#google-calendar--photos-setup)
 - [Optional integrations](#optional-integrations)
+- [Configuration reference](#configuration-reference)
 - [Installing on a Raspberry Pi (wall display)](#installing-on-a-raspberry-pi-wall-display)
 - [Phone companion](#phone-companion)
 - [Updating, backups & troubleshooting](#updating-backups--troubleshooting)
@@ -32,8 +33,10 @@ Inspired by the Skylight Calendar, but self-hosted: your family's data lives in 
 - 5-day, week, month (5- or 6-week grid), and per-person column views, tuned for 1080p touch.
 - Two-way Google Calendar sync for **multiple Google accounts** (for example, yours and your partner's). Changes arrive incrementally every 90 seconds, and an offline queue holds edits made while the internet is down.
 - Each calendar can belong to **one or more people**. A "Twins" calendar, for example, shows on both twins' columns and filters.
+- **Birthdays 🎂 and holidays 🎉** get their own colors, with toolbar toggles to show or hide them. Google's holiday and birthday calendars are recognized automatically, and a birthday that appears in two calendars shows once.
 - **10-day weather** on each day, plus tonight's dinner on the calendar.
 - Recurring and multi-day events, and color-coded family members with tap-to-filter.
+- **Sync Now** in Settings shows progress and the result, including exactly which calendar failed and why.
 
 **Chores & stars**
 - Morning, afternoon, evening, or anytime routines (daily, weekdays, weekends, specific days, or one-off).
@@ -41,11 +44,15 @@ Inspired by the Skylight Calendar, but self-hosted: your family's data lives in 
 
 **Lists & groceries**
 - Multiple lists, with groceries auto-sorted by store aisle and quantities merged ("2 cans" + "1 can").
+- Aisles are picked by the most specific match ("chicken broth" goes to Pantry, not Meat). If one is wrong, tap **⇄** on the item to move it, and Lucarne remembers that choice every time the item is added again.
+- **Store order:** arrange the aisles in the order you walk your store.
 - Live updates between the wall and phones.
 
 **Meals**
 - Weekly meal planner and a recipe library with a 1080p **Cook Mode**: big text, step timers, and the screen stays awake.
-- Recipe import from a URL without the ads and life stories (schema.org data, with optional Gemini fallback).
+- Recipe import from a URL without the ads and life stories (schema.org data, with optional Gemini fallback). The dish photo is saved locally.
+- **Meal search** (with a Gemini key): describe what you want ("easy chicken tacos") and get **real recipes from real recipe sites**, with their own photos. Nothing is invented: every result is a page Lucarne opened and verified.
+- A **recipe preview** with servings, prep and cook time, and calories, protein, carbs and fat per serving, as published by the site.
 - Send a week's ingredients to the grocery list, combining duplicates.
 - Bulk import from a JSON file of meals.
 
@@ -55,7 +62,8 @@ Inspired by the Skylight Calendar, but self-hosted: your family's data lives in 
 - Portrait photos are paired side by side, the order shuffles every time, and a night mode dims or shows just a clock.
 
 **Built for a wall**
-- Built-in on-screen keyboard, large touch targets, no loading spinners, and a tap-to-pick emoji picker.
+- Built-in on-screen keyboard that appears when you tap a text box and closes when you submit, plus large touch targets, no loading spinners, and a tap-to-pick emoji picker.
+- Errors are shown in plain language, can be selected and copied, and stay until dismissed.
 - Optional **Google Keep** sync, so "Hey Google, add milk to my shopping list" shows up on the wall. Per-person chore lists can sync to Keep too.
 
 ## How it works
@@ -68,7 +76,7 @@ One Node.js process serves the API, the web app, and a live update stream, backe
 | Web app | React 19, Vite, Tailwind CSS v4, TanStack Query, lucide icons |
 | Integrations | Google Calendar API, Google Photos Picker API, Open-Meteo weather, optional Gemini; optional Python helper for Google Keep |
 
-Everything works offline except syncing with Google and the weather.
+Everything works offline except syncing with Google, the weather, and importing or searching for recipes.
 
 ## Hardware
 
@@ -122,12 +130,20 @@ Each Lucarne install uses **its own** free Google Cloud project, so your data an
 
 ## Optional integrations
 
-### Recipe extraction & meal ideas (Gemini)
-Add `GEMINI_API_KEY=...` to `.env`, or enter it in Settings. Without it, recipe import still works for any site that publishes standard recipe data (most do).
+### Meal search & recipe cleanup (Gemini)
+Get a free API key at [Google AI Studio](https://aistudio.google.com/apikey), then add `GEMINI_API_KEY=...` to `.env` or enter it in Settings. Without a key, recipe import still works for any site that publishes standard recipe data (most do); meal search needs the key.
 
-Lucarne automatically uses the newest stable Gemini Flash model and switches by itself when Google retires one. To pin a specific model, set `GEMINI_MODEL=...` in `.env`.
+**How meal search works:**
+1. Gemini suggests recipe pages that match your search. It uses Google Search when your key allows it, otherwise its own knowledge.
+2. Lucarne opens every suggested page and keeps only real recipe pages it can read. Made-up links, non-recipe pages and sites that block downloads are dropped, so a search may return fewer than three results rather than padded ones.
+3. Results show the site's own photo, ingredients, steps and nutrition. The photo is saved locally when you tap **Save Recipe**.
 
-Some large recipe sites (for example Allrecipes and EatingWell) block automated downloads, so importing their URLs fails with "HTTP 403". For those, use JSON import below, or add the recipe by hand.
+**Models and free-tier limits:** Lucarne picks Gemini models automatically and switches when Google retires one. It uses full **Flash** models for searching and reading recipe pages, and lighter **Flash-Lite** models for small jobs like tidying ingredient lists. The free tier is tight: each Flash model allows about **5 requests a minute and 20 a day**, and Flash-Lite allows 15 a minute and 500 a day (limits are per model; check yours at [ai.dev/rate-limit](https://ai.dev/rate-limit)). Lucarne counts its own requests and skips a model at its limit. If Google is busy, it quickly tries another model. If everything is used up, the message says when it resets (midnight Pacific).
+
+- `GEMINI_MODEL=...` pins one specific model.
+- `GEMINI_PAID_TIER=1` turns off Lucarne's own free-tier limits if your key has billing enabled.
+
+Some large recipe sites (for example Allrecipes, EatingWell, Budget Bytes and Simply Recipes) block automated downloads, so importing their URLs fails with "HTTP 403", and meal search skips them. For those, use JSON import below, or add the recipe by hand.
 
 ### Importing recipes from JSON
 Bring an existing recipe collection in through **Meals → Import → JSON Meals Seed**, or from the command line:
@@ -136,7 +152,7 @@ Bring an existing recipe collection in through **Meals → Import → JSON Meals
 npm run import:meals -- path/to/meals.json
 ```
 
-See [`examples/meals.sample.json`](examples/meals.sample.json) for a complete example. The file can be a plain array of recipes or an object with a `meals`, `recipes` or `items` array. Recipes already in your library (same source URL, or same title when there's no URL) are skipped, so re-importing is safe.
+See [`examples/meals.sample.json`](examples/meals.sample.json) for a complete example. The file can be a plain array of recipes or an object with a `meals`, `recipes` or `items` array. Recipes already in your library (same source URL, or same title when there's no URL) are skipped, so re-importing is safe. If a skipped recipe has no photo yet and the file includes one, the photo is added. Image links are downloaded and stored locally.
 
 | Field | Also accepted as | Notes |
 |---|---|---|
@@ -150,6 +166,7 @@ See [`examples/meals.sample.json`](examples/meals.sample.json) for a complete ex
 | `imageUrl` | `image`, `photo`, `thumbnail` | Image URL. |
 | `sourceUrl` | `url`, `link` | Original recipe page. Also used to detect duplicates. |
 | `favorite` | | `true` marks it as a favorite. |
+| `nutrition` | | Per serving: `{ "calories", "proteinG", "carbsG", "fatG" }` as numbers, or the schema.org form recipe sites use (`"calories": "350 kcal"`, `"proteinContent": "25 g"`, …). |
 
 Ingredient `category` must be one of: `Produce`, `Dairy & Eggs`, `Meat & Seafood`, `Bakery`, `Frozen`, `Pantry`, `Snacks & Drinks`, `Household`, `Other`. If it's left out, Lucarne picks the aisle automatically.
 
@@ -180,6 +197,21 @@ npm run keep:login   # run in your own terminal; it asks for a secret token
 3. Paste it into the prompt right away; it's single-use and expires within minutes.
 
 The resulting token is saved to `data/keep/credentials.json` (git-ignored). **It grants broad access to that Google account**, so keep the device secure; revoke it any time from your Google account's device list. Then choose lists in **Settings → Google Keep Lists**.
+
+## Configuration reference
+
+Settings live in `.env` (copy `.env.example`). Google and Gemini keys can also be entered in **Settings** instead.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `PORT` | `3001` | Web/API port. |
+| `DATA_DIR` | `./data` | Where the database, downloaded photos, backups and Keep credentials are stored. |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | — | Your Google Cloud OAuth client (see setup above). |
+| `GOOGLE_REDIRECT_URI` | `http://localhost:3001/api/google/callback` | Must match the redirect URI in Google Cloud. |
+| `GEMINI_API_KEY` | — | Enables meal search and AI recipe cleanup. |
+| `GEMINI_MODEL` | automatic | Pin one Gemini model instead of automatic selection. |
+| `GEMINI_PAID_TIER` | off | Set to `1` to disable Lucarne's free-tier request limits (billing-enabled keys). |
+| `KEEP_PYTHON` | `python3` (`python` on Windows) | Python used to create the Keep helper's environment, if not the default. |
 
 ## Installing on a Raspberry Pi (wall display)
 
@@ -265,6 +297,9 @@ Database changes are applied automatically on start.
 - **Google errors** are shown in plain language in Settings, with a fix link and a Copy button.
 - **"…API isn't enabled in your Google Cloud project"**: open the link in the message and click **Enable**, wait a few minutes, then retry.
 - **Calendar stops syncing after about a week:** the Google app is still in **Testing**. Publish it (setup step 5), then reconnect the accounts.
+- **"Gemini's free daily limit is used up"** or **"Gemini is busy right now":** the free tier allows only about 20 requests a day per Flash model, and Google is sometimes overloaded. Wait for the reset time shown, or add billing to the key and set `GEMINI_PAID_TIER=1`.
+- **Meal search finds nothing:** try simpler words ("chicken tacos"), or paste a recipe link into **Strip Recipe Website URL**. Some sites block downloads and are skipped.
+- **An item is in the wrong grocery aisle:** tap **⇄** on it and pick the right aisle. Lucarne remembers that choice.
 - **Server logs:** `journalctl -u lucarne -f`.
 
 ## Development & tests
@@ -277,13 +312,19 @@ npm run test:e2e       # builds, then runs real-browser tests at 1920×1080 and 
 npm run import:meals -- ./meals.json
 ```
 
-Tests never touch real Google services. They run against local mock servers (Google OAuth/Calendar/Photos, Gemini, Keep, and shared albums) and use a throwaway data folder, never your real `data/`.
+Tests never touch real Google services or recipe sites. They run against local mock servers (Google OAuth/Calendar/Photos, Gemini, Keep, shared albums, recipe pages) and use a throwaway data folder, never your real `data/`.
 
 Project layout: `src/server` (API, sync services, database migrations), `src/client` (React views and components), `src/shared` (types and logic shared by both), `keep-bridge/` (optional Python Keep helper), `deploy/` (systemd and kiosk files), `docs/` (GitHub Pages home and privacy pages), `tests/`.
 
 ## Privacy
 
-There is no Lucarne cloud. Everything is stored on your own device, and data goes only to Google's own services (for the features you connect), Open-Meteo for weather, and Gemini if you add a key. See [`docs/privacy.html`](docs/privacy.html).
+There is no Lucarne cloud. Everything is stored on your own device. Data goes only to:
+- Google's own services, for the features you connect;
+- Open-Meteo, for weather at the location you set;
+- Gemini, if you add a key: your meal-search words and, for pages without structured recipe data, the page text;
+- the recipe websites whose pages you import or that meal search checks (Lucarne downloads those pages and photos like a browser would).
+
+See [`docs/privacy.html`](docs/privacy.html).
 
 ## Credits & acknowledgements
 
