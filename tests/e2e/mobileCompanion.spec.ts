@@ -41,15 +41,20 @@ test('Mobile Companion PWA (390x844): Bottom Nav, Responsive Views & Zero Horizo
     const desktopSidebar = page.locator('aside');
     assert.equal(await desktopSidebar.isVisible(), false, 'Desktop sidebar must be hidden on mobile screen');
 
-    // 2. Verify Mobile Bottom Navigation Bar is visible with 5 items
+    // 2. Verify Mobile Bottom Navigation Bar is visible with 6 items
     const mobileBottomNav = page.locator('nav.md\\:hidden');
     assert.equal(await mobileBottomNav.isVisible(), true, 'Mobile bottom nav bar must be visible on mobile screens');
     const navButtons = mobileBottomNav.locator('button');
-    assert.equal(await navButtons.count(), 5, 'Mobile bottom nav bar must contain 5 navigation buttons');
+    assert.equal(await navButtons.count(), 6, 'Mobile bottom nav bar must contain 6 navigation buttons');
 
     // 3. Check Calendar View on mobile
     await page.waitForSelector('text=5-Day');
     await assertZeroHorizontalOverflow('Mobile Calendar View');
+
+    // 3b. Home stacks its panels on a phone without sideways overflow
+    await mobileBottomNav.locator('button', { hasText: 'Home' }).click();
+    await page.waitForSelector('[data-testid="home-view"]');
+    await assertZeroHorizontalOverflow('Mobile Home View');
 
     // 4. Navigate to Chores View via bottom nav
     const choresTab = mobileBottomNav.locator('button', { hasText: 'Chores' });

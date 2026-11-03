@@ -3,16 +3,19 @@ import { useQuery } from '@tanstack/react-query';
 import {
   Calendar,
   CheckSquare,
+  House,
   Image as ImageIcon,
   ListChecks,
   Settings as SettingsIcon,
   UtensilsCrossed,
 } from 'lucide-react';
 import { apiFetch, useRealtimeSync } from './lib/api.js';
+import { eventLook } from './lib/eventColors.js';
 import { WeatherWidget } from './components/WeatherWidget.js';
 import { OnScreenKeyboard } from './components/OnScreenKeyboard.js';
 import { LeaveBanner, SyncStatusChip } from './components/TodayBar.js';
 import { CalendarView } from './views/CalendarView.js';
+import { HomeView } from './views/HomeView.js';
 import { ChoresView } from './views/ChoresView.js';
 import { ListsView } from './views/ListsView.js';
 import { MealsView } from './views/MealsView.js';
@@ -20,7 +23,7 @@ import { ScreensaverOverlay } from './views/ScreensaverOverlay.js';
 import { SettingsView } from './views/SettingsView.js';
 import { GROCERY_CATEGORIES, type AppSettings, type FamilyMember } from '../shared/types.js';
 
-type NavTab = 'calendar' | 'chores' | 'lists' | 'meals' | 'settings';
+type NavTab = 'home' | 'calendar' | 'chores' | 'lists' | 'meals' | 'settings';
 
 const FALLBACK_SETTINGS: AppSettings = {
   familyName: 'Our Family',
@@ -52,8 +55,9 @@ export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<NavTab>(() => {
     const params = new URLSearchParams(window.location.search);
     const t = params.get('tab');
-    if (t === 'settings' || t === 'chores' || t === 'lists' || t === 'meals') return t;
-    return 'calendar';
+    if (t === 'home' || t === 'calendar' || t === 'settings' || t === 'chores' || t === 'lists' || t === 'meals') return t;
+    // The wall opens on Home ("today at a glance"); phones open on the calendar.
+    return window.matchMedia?.('(min-width: 768px)').matches ? 'home' : 'calendar';
   });
 
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
@@ -105,6 +109,7 @@ export const App: React.FC = () => {
   };
 
   const navItems: Array<{ key: NavTab; label: string; Icon: React.ElementType }> = [
+    { key: 'home', label: 'Home', Icon: House },
     { key: 'calendar', label: 'Calendar', Icon: Calendar },
     { key: 'chores', label: 'Chores', Icon: CheckSquare },
     { key: 'lists', label: 'Lists', Icon: ListChecks },
@@ -134,7 +139,7 @@ export const App: React.FC = () => {
             type="button"
             onClick={() => toggleMemberFilter(m.id)}
             style={{
-              backgroundColor: m.colorBg,
+              background: m.role === 'family' ? eventLook({ memberIds: [m.id], category: null }, members).background : m.colorBg,
               color: m.colorText,
               borderColor:
                 selectedMemberIds.includes(m.id) ? m.colorAccent : 'transparent',
@@ -243,6 +248,7 @@ export const App: React.FC = () => {
 
         {/* Active View Canvas */}
         <main className="flex-1 min-h-0 p-3.5 md:p-5 overflow-hidden">
+          {activeTab === 'home' && <HomeView members={members} settings={settings} onOpenTab={setActiveTab} />}
           {activeTab === 'calendar' && (
             <CalendarView
               members={members}
@@ -262,7 +268,7 @@ export const App: React.FC = () => {
         </main>
 
         {/* Mobile Companion PWA Bottom Tab Bar (< 768px phones at the grocery store!) */}
-        <nav className="md:hidden min-h-16 shrink-0 bg-white border-t border-stone-200 grid grid-cols-5 px-1 pb-[env(safe-area-inset-bottom,0px)]">
+        <nav className="md:hidden min-h-16 shrink-0 bg-white border-t border-stone-200 grid grid-cols-6 px-1 pb-[env(safe-area-inset-bottom,0px)]">
           {navItems.map(({ key, label, Icon }) => {
             const active = activeTab === key;
             return (

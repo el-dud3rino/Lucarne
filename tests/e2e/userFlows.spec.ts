@@ -19,7 +19,9 @@ test('End-to-End User Flows: Calendar, Chores & Stars, Groceries, Meals & Cook M
     // =========================================================
     // 1. CALENDAR EVENT FLOW (Create, View, Edit, Delete)
     // =========================================================
-    // Verify default view is Calendar
+    // The wall opens on Home; go to the Calendar
+    await page.waitForSelector('[data-testid="home-view"]');
+    await page.locator('aside button', { hasText: 'Calendar' }).click();
     await page.waitForSelector('text=5-Day');
 
     // Click "+" button on the first day column

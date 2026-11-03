@@ -63,6 +63,13 @@ async function shot(page: Page, name: string) {
   console.log('  saved', path.relative(process.cwd(), file), `(${Math.round(fs.statSync(file).size / 1024)} KB)`);
 }
 
+/** Screenshots always show the demo day at 4:00 PM, whatever time they're taken. */
+const DEMO_CLOCK = (() => {
+  const d = new Date();
+  d.setHours(16, 0, 0, 0);
+  return d;
+})();
+
 const nav = (page: Page, label: string) => page.locator('aside button', { hasText: label }).first().click();
 
 try {
@@ -71,9 +78,15 @@ try {
 
   // ---------- wall display, 1920x1080 ----------
   const wall = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+  await wall.clock.install({ time: DEMO_CLOCK });
   await wall.goto(BASE, { waitUntil: 'networkidle' });
+  await wall.waitForSelector('[data-testid="home-view"]');
+  await settle(wall, 2000); // weather + fonts + recipe photo
+  await shot(wall, 'home');
+
+  await nav(wall, 'Calendar');
   await wall.waitForSelector('text=5-Day');
-  await settle(wall, 2000); // weather + fonts
+  await settle(wall);
   await shot(wall, 'calendar-5day');
 
   await wall.locator('button', { hasText: /^Week$/ }).first().click();
@@ -141,6 +154,7 @@ try {
 
   // ---------- phone companion, 390x844 ----------
   const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  await phone.clock.install({ time: DEMO_CLOCK });
   await phone.goto(BASE, { waitUntil: 'networkidle' });
   await settle(phone, 1500);
   await shot(phone, 'phone-calendar');

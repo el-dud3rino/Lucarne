@@ -2,6 +2,7 @@ import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Car, CalendarDays, Utensils } from 'lucide-react';
 import { apiFetch } from '../lib/api.js';
+import { eventLook } from '../lib/eventColors.js';
 import { toDateStr, formatTimeShort } from '../lib/dates.js';
 import { useDailyForecast } from '../lib/weather.js';
 import { useToday } from './TodayBar.js';
@@ -51,10 +52,9 @@ export const TodayBrief: React.FC<{ settings: AppSettings; active: boolean }> = 
             <CalendarDays className="w-3.5 h-3.5" /> Today
           </div>
           {upcoming.map((e) => {
-            const m = e.memberIds[0] ? byId.get(e.memberIds[0]) : undefined;
             return (
               <div key={e.id} className="flex items-center gap-2.5 text-base">
-                <span className="w-1.5 h-6 rounded-full shrink-0" style={{ backgroundColor: m?.colorAccent ?? '#94A3B8' }} />
+                <span className="w-1.5 h-6 rounded-full shrink-0" style={{ background: eventLook(e, members).bar }} />
                 <span className="w-[72px] shrink-0 text-sm font-bold text-white/70">{e.allDay ? 'All day' : formatTimeShort(e.startIso)}</span>
                 <span className="font-bold truncate">{e.title}</span>
               </div>

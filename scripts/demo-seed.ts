@@ -206,9 +206,10 @@ runTransaction(() => {
   }
 
   // ---------- getting there: drive times and drivers ----------
-  // A swim lesson starting ~40 min from now with a 20 min drive, so the "Leave in …" banner shows.
-  const soon = new Date(Date.now() + 40 * 60_000);
-  soon.setMinutes(Math.ceil(soon.getMinutes() / 5) * 5, 0, 0);
+  // A swim lesson at 4:40 PM with a 20 min drive. Screenshots pin the clock to 4:00 PM
+  // (DEMO_CLOCK in demo-screenshots.ts), so the "Leave in …" banner shows.
+  const soon = day(0);
+  soon.setHours(16, 40, 0, 0);
   db.prepare(
     `INSERT INTO events (id, title, description, location, start_iso, end_iso, all_day, member_ids_json, updated_at, travel_minutes, driver_member_id)
      VALUES (?, 'Leo: Swim Lesson', 'Goggles + towel', 'Rec Center Pool', ?, ?, 0, ?, ?, 20, ?)`

@@ -17,6 +17,7 @@ import {
 import { CountdownStrip, CountdownsSheet } from '../components/Countdowns.js';
 import { MagicImportSheet } from '../components/MagicImport.js';
 import { apiFetch } from '../lib/api.js';
+import { eventLook, memberSwatch } from '../lib/eventColors.js';
 import { DayWeather, useDailyForecast } from '../lib/weather.js';
 import { CATEGORY_STYLES, EVENT_CATEGORIES, type EventCategory } from '../../shared/eventCategories.js';
 import {
@@ -218,26 +219,38 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     }
   };
 
-  const getEventStyle = (ev: CalendarEvent) => {
-    if (ev.category) {
-      const c = CATEGORY_STYLES[ev.category];
-      return { bg: c.bg, text: c.text, accent: c.accent };
-    }
-    const primary = ev.memberIds[0] ? memberMap.get(ev.memberIds[0]) : undefined;
-    return {
-      bg: primary?.colorBg || '#F1F5F9',
-      text: primary?.colorText || '#1E293B',
-      accent: primary?.colorAccent || '#64748B',
-    };
-  };
 
   const today = new Date();
 
+  const renderAvatars = (list: FamilyMember[], max: number) => {
+    if (list.length === 0) return null;
+    const shown = list.length > max ? list.slice(0, max - 1) : list;
+    const extra = list.length - shown.length;
+    return (
+      <div className="flex -space-x-1 shrink-0">
+        {shown.map((m) => (
+          <span
+            key={m.id}
+            style={{ background: memberSwatch(m, members) }}
+            className="w-5 h-5 rounded-full text-[10px] font-bold text-white flex items-center justify-center ring-2 ring-white [text-shadow:0_0_2px_rgba(0,0,0,0.45)]"
+            title={m.name}
+          >
+            {m.initial}
+          </span>
+        ))}
+        {extra > 0 && (
+          <span className="w-5 h-5 rounded-full text-[9px] font-bold bg-slate-600 text-white flex items-center justify-center ring-2 ring-white">+{extra}</span>
+        )}
+      </div>
+    );
+  };
+
   const renderEventCard = (ev: CalendarEvent, compact = false) => {
-    const style = getEventStyle(ev);
-    const evMembers = ev.memberIds
-      .map((id) => memberMap.get(id))
-      .filter((x): x is FamilyMember => Boolean(x));
+    const look = eventLook(ev, members);
+    const assigned = ev.memberIds.map((id) => memberMap.get(id)).filter((x): x is FamilyMember => Boolean(x));
+    // A Family event shows one striped Family badge rather than every person's initial.
+    const evMembers = assigned.some((m) => m.role === 'family') ? assigned.filter((m) => m.role === 'family') : assigned;
+    const bar = <span aria-hidden className="absolute left-0 inset-y-0 w-1" style={{ background: look.bar }} />;
 
     if (compact) {
       return (
@@ -248,13 +261,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             e.stopPropagation();
             setEditingEvent(ev);
           }}
-          style={{
-            backgroundColor: style.bg,
-            color: style.text,
-            borderLeftColor: style.accent,
-          }}
-          className="w-full text-left rounded-xl border-l-4 shadow-2xs transition active:scale-[0.98] hover:brightness-[0.98] h-10 min-h-[40px] max-h-[40px] px-2.5 py-1.5 flex items-center gap-2 overflow-hidden"
+          style={{ background: look.background, color: look.text }}
+          data-striped={look.striped || undefined}
+          className="relative w-full text-left rounded-xl shadow-2xs transition active:scale-[0.98] hover:brightness-[0.98] h-10 min-h-[40px] max-h-[40px] pl-3.5 pr-2.5 py-1.5 flex items-center gap-2 overflow-hidden"
         >
+          {bar}
           {!ev.allDay && (
             <span className="text-[11px] font-bold opacity-75 shrink-0">
               {formatTimeShort(ev.startIso)}
@@ -264,20 +275,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             {ev.category && <span aria-hidden className="mr-1">{CATEGORY_STYLES[ev.category].icon}</span>}
             {ev.title}
           </span>
-          {evMembers.length > 0 && (
-            <div className="flex -space-x-1 shrink-0">
-              {evMembers.slice(0, 2).map((m) => (
-                <span
-                  key={m.id}
-                  style={{ backgroundColor: m.colorAccent }}
-                  className="w-5 h-5 rounded-full text-[10px] font-bold text-white flex items-center justify-center ring-2 ring-white"
-                  title={m.name}
-                >
-                  {m.initial}
-                </span>
-              ))}
-            </div>
-          )}
+          {renderAvatars(evMembers, 3)}
         </button>
       );
     }
@@ -290,32 +288,17 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           e.stopPropagation();
           setEditingEvent(ev);
         }}
-        style={{
-          backgroundColor: style.bg,
-          color: style.text,
-          borderLeftColor: style.accent,
-        }}
-        className="w-full text-left rounded-xl border-l-4 shadow-2xs transition active:scale-[0.98] hover:brightness-[0.98] min-h-[40px] flex flex-col justify-center px-3.5 py-2.5"
+        style={{ background: look.background, color: look.text }}
+        data-striped={look.striped || undefined}
+        className="relative overflow-hidden w-full text-left rounded-xl shadow-2xs transition active:scale-[0.98] hover:brightness-[0.98] min-h-[40px] flex flex-col justify-center pl-[18px] pr-3.5 py-2.5"
       >
+        {bar}
         <div className="flex items-start justify-between gap-2">
           <span className="font-bold leading-snug text-sm md:text-[15px]">
             {ev.category && <span aria-hidden className="mr-1">{CATEGORY_STYLES[ev.category].icon}</span>}
             {ev.title}
           </span>
-          {evMembers.length > 0 && (
-            <div className="flex -space-x-1 shrink-0">
-              {evMembers.slice(0, 3).map((m) => (
-                <span
-                  key={m.id}
-                  style={{ backgroundColor: m.colorAccent }}
-                  className="w-5 h-5 rounded-full text-[10px] font-bold text-white flex items-center justify-center ring-2 ring-white"
-                  title={m.name}
-                >
-                  {m.initial}
-                </span>
-              ))}
-            </div>
-          )}
+          {renderAvatars(evMembers, 4)}
         </div>
 
         {!ev.allDay && (
@@ -601,12 +584,12 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                   className="flex flex-col h-full rounded-2xl bg-white border border-stone-200/90 shadow-2xs overflow-hidden cursor-pointer"
                 >
                   <div
-                    style={{ backgroundColor: member.colorBg, color: member.colorText }}
+                    style={{ background: member.role === 'family' ? eventLook({ memberIds: [member.id], category: null }, members).background : member.colorBg, color: member.colorText }}
                     className="px-4 py-3.5 border-b border-stone-100 flex items-center justify-between"
                   >
                     <div className="flex items-center gap-2.5">
                       <span
-                        style={{ backgroundColor: member.colorAccent }}
+                        style={{ background: memberSwatch(member, members) }}
                         className="w-9 h-9 rounded-full text-white font-bold flex items-center justify-center text-base shadow-2xs"
                       >
                         {member.emoji || member.initial}

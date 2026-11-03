@@ -71,7 +71,13 @@ test('Kiosk 1920x1080 Zero Overflow & Touch Target Sizes across views', async ()
       );
     };
 
-    // 1. Calendar View: Schedule sub-view (default)
+    // 0. Home ("today at a glance") is the wall's default view
+    await page.waitForSelector('[data-testid="home-view"]');
+    await assertZeroHorizontalOverflow('Home');
+    await assertPrimaryControlTouchTargets('Home');
+
+    // 1. Calendar View: Schedule sub-view
+    await page.locator('aside button', { hasText: 'Calendar' }).click();
     await page.waitForSelector('text=5-Day');
     await assertZeroHorizontalOverflow('Calendar Schedule');
     await assertPrimaryControlTouchTargets('Calendar Schedule');

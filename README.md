@@ -6,9 +6,12 @@ Inspired by the Skylight Calendar, but self-hosted: your family's data lives in 
 
 > **Status:** early and actively developed. Expect rough edges, and please report bugs through GitHub Issues.
 
-![Lucarne 5-day family calendar on a 1080p wall display](docs/screenshots/calendar-5day.jpg)
+![Lucarne Home screen on a 1080p wall display: today's calendar, chores per person, and lists](docs/screenshots/home.jpg)
 
 <table>
+  <tr>
+    <td colspan="2"><img src="docs/screenshots/calendar-5day.jpg" alt="5-day family calendar"><br><sub><b>5-day calendar</b>: shared events are striped in each person's color</sub></td>
+  </tr>
   <tr>
     <td width="50%"><img src="docs/screenshots/calendar-month.jpg" alt="Month view with birthdays and holidays"><br><sub><b>Month view</b>: birthdays 🎂 and holidays 🎉 in their own colors</sub></td>
     <td width="50%"><img src="docs/screenshots/chores.jpg" alt="Chores per person with stars"><br><sub><b>Chores</b>: per-person chores and stars</sub></td>
@@ -67,6 +70,12 @@ Inspired by the Skylight Calendar, but self-hosted: your family's data lives in 
 
 ## Features
 
+**Home: today at a glance**
+- The wall opens on **Home**: today's calendar on the left, with a "now" line, past events faded and what's on right now highlighted, plus the weather and tonight's dinner.
+- On the right, **each person's chores** in their own color (swipe left/right for more people and "up for grabs"), with today's stars and progress bars. Tap to check one off.
+- Below that, **every list** side by side: check items off, or add one right there. A checked item stays visible, crossed out, so a mis-tap is one tap to undo.
+- Phones still open on the calendar; Home is one tap away in the bottom bar.
+
 **Calendar**
 - 5-day, week, month (5- or 6-week grid), and per-person column views, tuned for 1080p touch.
 - Two-way Google Calendar sync for **multiple Google accounts** (for example, yours and your partner's). Changes arrive incrementally every 90 seconds, and an offline queue holds edits made while the internet is down.
@@ -74,6 +83,7 @@ Inspired by the Skylight Calendar, but self-hosted: your family's data lives in 
 - **Birthdays 🎂 and holidays 🎉** get their own colors, with toolbar toggles to show or hide them. Google's holiday and birthday calendars are recognized automatically, and a birthday that appears in two calendars shows once.
 - **10-day weather** on each day, plus tonight's dinner on the calendar.
 - Recurring and multi-day events, and color-coded family members with tap-to-filter.
+- **Striped colors for shared events:** an event for several people shows diagonal stripes in each person's color, and a Family event shows everyone's, so you can tell at a glance who it's for.
 - **Calendar links (read-only):** subscribe to any `.ics` / `webcal://` link, such as a school district calendar, TeamSnap or GameChanger schedule, or a family member's iCloud or Outlook calendar. Assign it to people, and it refreshes every 30 minutes.
 - **Magic Import** (with a Gemini key): take a photo of a school flyer, sports schedule or invitation, or paste an email, and Lucarne finds the dates. You review and edit every event before anything is added.
 - **Countdowns:** "🏖️ Lake House Weekend · 15 days" chips on the calendar, the photo frame and Kid Mode.
@@ -417,11 +427,7 @@ All product names and trademarks belong to their owners. Lucarne's unofficial in
 
 ## Roadmap
 
-Planned next:
-- Striped colors for events with several people.
-- A "today at a glance" Home screen: today's calendar on the left, per-person chores and lists on the right.
-
-Backlogged: a Home Assistant / webhook integration.
+Backlogged: a Home Assistant / webhook integration. Ideas and requests are welcome in GitHub Issues.
 
 ## License
 

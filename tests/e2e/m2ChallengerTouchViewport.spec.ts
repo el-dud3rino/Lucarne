@@ -114,7 +114,12 @@ test('Challenger M2: Touch Target Compliance & Multi-Viewport Overflow Stress', 
     // =========================================================================
     const allUndersized: UndersizedElement[] = [];
 
+    // 1.0 Home (default on the wall)
+    await page.waitForSelector('[data-testid="home-view"]');
+    allUndersized.push(...(await scanTouchTargets(page, 'Home')));
+
     // 1.1 Calendar Schedule Sub-View
+    await page.locator('aside button', { hasText: 'Calendar' }).click();
     await page.waitForSelector('text=5-Day');
     allUndersized.push(...(await scanTouchTargets(page, 'Calendar (Schedule)')));
 
@@ -603,6 +608,7 @@ test('Challenger M2: Touch Target Compliance & Multi-Viewport Overflow Stress', 
     // Reload page to re-fetch all newly inserted events
     await page.reload({ waitUntil: 'networkidle' });
     await page.waitForTimeout(300);
+    await page.locator('aside button', { hasText: 'Calendar' }).click();
 
     // Re-select Month sub-view
     const monthTabAfterEvents = page.locator('button', { hasText: 'Month' });
