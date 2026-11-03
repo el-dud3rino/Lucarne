@@ -21,7 +21,7 @@ test('single person is a solid color', () => {
 test('several people get diagonal stripes in their colors', () => {
   const look = eventLook({ memberIds: ['mom', 'leo'], category: null }, members);
   assert.equal(look.striped, true);
-  assert.match(look.background, /^repeating-linear-gradient\(135deg, #fde 0px 12px, #def 12px 24px\)$/);
+  assert.equal(look.background, 'linear-gradient(135deg, #fde 0.00% 50.00%, #def 50.00% 100.00%)', 'each color once, as diagonal bands');
   assert.match(look.bar, /#f00 0\.00% 50\.00%, #00f 50\.00% 100\.00%/);
 });
 
@@ -29,7 +29,7 @@ test('Family (or nobody) means everyone, in household order', () => {
   assert.deepEqual(eventPeople({ memberIds: ['fam'] }, members).map((m) => m.id), ['mom', 'leo', 'maya']);
   assert.deepEqual(eventPeople({ memberIds: [] }, members).map((m) => m.id), ['mom', 'leo', 'maya']);
   assert.equal(eventLook({ memberIds: ['fam'], category: null }, members).striped, true);
-  assert.match(memberSwatch(family, members), /repeating-linear-gradient/);
+  assert.match(memberSwatch(family, members), /^linear-gradient\(135deg/);
   assert.equal(memberSwatch(leo, members), '#00f');
 });
 

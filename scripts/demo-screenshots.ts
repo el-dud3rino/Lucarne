@@ -28,7 +28,17 @@ if (!fs.existsSync('dist/server/server/index.js')) {
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
 const server = spawn(process.execPath, ['--no-warnings', 'dist/server/server/index.js'], {
-  env: { ...process.env, DATA_DIR: DEMO_DIR, PORT: String(PORT), GEMINI_API_KEY: '', GOOGLE_CLIENT_ID: '' },
+  env: {
+    ...process.env,
+    DATA_DIR: DEMO_DIR,
+    PORT: String(PORT),
+    GEMINI_API_KEY: '',
+    GOOGLE_CLIENT_ID: '',
+    GOOGLE_MAPS_API_KEY: '',
+    // The demo's Maps key is a placeholder: send any Maps request to a dead local port, never to Google.
+    GOOGLE_PLACES_BASE_URL: 'http://127.0.0.1:9',
+    GOOGLE_ROUTES_BASE_URL: 'http://127.0.0.1:9',
+  },
   stdio: 'ignore',
 });
 
@@ -72,6 +82,52 @@ const DEMO_CLOCK = (() => {
 
 const nav = (page: Page, label: string) => page.locator('aside button', { hasText: label }).first().click();
 
+/** Draws a simple kid's picture (sun, house, grass, flower) through the real Draw page. */
+async function drawPicture(page: Page) {
+  const box = (await page.locator('[data-testid="draw-canvas"] canvas').boundingBox())!;
+  const P = (x: number, y: number) => ({ x: box.x + box.width * x, y: box.y + box.height * y });
+  const stroke = async (pts: Array<[number, number]>) => {
+    const [first, ...rest] = pts.map(([x, y]) => P(x, y));
+    await page.mouse.move(first.x, first.y);
+    await page.mouse.down();
+    for (const p of rest) await page.mouse.move(p.x, p.y, { steps: 6 });
+    await page.mouse.up();
+  };
+  const circle = (cx: number, cy: number, r: number, turns = 1): Array<[number, number]> =>
+    Array.from({ length: Math.round(28 * turns) + 1 }, (_, i) => {
+      const a = (i / 28) * Math.PI * 2;
+      return [cx + (Math.cos(a) * r * 9) / 16, cy + Math.sin(a) * r];
+    });
+  const tool = async (t: string, colorIndex: number) => {
+    await page.locator(`[data-testid="draw-tool-${t}"]`).click();
+    await page.locator('button[aria-label^="color "]').nth(colorIndex).click();
+  };
+  // Grass and sky with paint
+  await tool('paint', 4);
+  for (const y of [0.86, 0.91, 0.96]) await stroke([[0.02, y], [0.35, y - 0.02], [0.65, y + 0.01], [0.98, y - 0.01]]);
+  await tool('paint', 5);
+  for (const y of [0.05, 0.1]) await stroke([[0.02, y], [0.3, y + 0.01], [0.6, y - 0.01], [0.98, y]]);
+  // Sun with crayon
+  await tool('crayon', 2);
+  for (const r of [0.1, 0.07, 0.04]) await stroke(circle(0.84, 0.26, r, 1.05));
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    await stroke([[0.84 + Math.cos(a) * 0.075, 0.26 + Math.sin(a) * 0.13], [0.84 + Math.cos(a) * 0.11, 0.26 + Math.sin(a) * 0.2]]);
+  }
+  // House with markers
+  await tool('marker', 0);
+  await stroke([[0.22, 0.84], [0.22, 0.5], [0.46, 0.5], [0.46, 0.84], [0.22, 0.84]]);
+  await stroke([[0.19, 0.52], [0.34, 0.26], [0.49, 0.52]]);
+  await tool('marker', 7);
+  await stroke([[0.31, 0.84], [0.31, 0.68], [0.37, 0.68], [0.37, 0.84]]);
+  await stroke([[0.25, 0.56], [0.29, 0.56], [0.29, 0.63], [0.25, 0.63], [0.25, 0.56]]);
+  // Flower with crayons
+  await tool('crayon', 10);
+  for (const [dx, dy] of [[0, -0.06], [0.035, 0], [0, 0.06], [-0.035, 0]]) await stroke(circle(0.68 + dx, 0.62 + dy, 0.035, 1.05));
+  await tool('crayon', 4);
+  await stroke([[0.68, 0.66], [0.68, 0.86]]);
+}
+
 try {
   await waitForServer();
   const browser = await launch();
@@ -88,6 +144,14 @@ try {
   await wall.waitForSelector('text=5-Day');
   await settle(wall);
   await shot(wall, 'calendar-5day');
+
+  // Event form: Google Maps place + automatic drive time (from the demo's cached estimate)
+  await wall.locator('button', { hasText: 'Haircuts' }).first().click();
+  await wall.waitForSelector('text=Auto · 9 min');
+  await settle(wall, 400);
+  await wall.locator('form').first().screenshot({ path: path.join(OUT_DIR, 'event-drive.jpg'), type: 'jpeg', quality: 85 });
+  console.log('  saved docs/screenshots/event-drive.jpg');
+  await wall.locator('button', { hasText: 'Cancel' }).first().click();
 
   await wall.locator('button', { hasText: /^Week$/ }).first().click();
   await settle(wall);
@@ -146,10 +210,34 @@ try {
     await wall.keyboard.press('Escape');
   }
 
+  // Draw: a kid's picture, saved into the photo rotation
+  await wall.goto(`${BASE}/?tab=draw`, { waitUntil: 'networkidle' }); // ('Draw' also matches buttons on Meals)
+  await wall.locator('[data-testid^="draw-artist-"]', { hasText: 'Leo' }).first().click();
+  await wall.waitForSelector('[data-testid="draw-canvas"] canvas[data-ready="true"]');
+  await drawPicture(wall);
+  await wall.locator('[data-testid="draw-tool-crayon"]').click();
+  await settle(wall, 300);
+  await shot(wall, 'draw');
+  await wall.locator('[data-testid="draw-done"]').click();
+  await wall.waitForSelector('[data-testid="draw-saved"]');
+  await wall.clock.fastForward(2000);
+  await wall.locator('[data-testid="draw-canvas"]').waitFor({ state: 'detached' });
+
   await wall.goto(BASE, { waitUntil: 'networkidle' });
   await nav(wall, 'Photos');
   await settle(wall, 3500); // photo fade-in
   await shot(wall, 'screensaver');
+
+  // Keep the slideshow going until the drawing comes around (one per 10–15 photos)
+  for (let i = 0; i < 40; i++) {
+    if (await wall.locator('div.opacity-100 img[src^="/media/art/"]').count()) {
+      await settle(wall, 1200);
+      await shot(wall, 'screensaver-art');
+      break;
+    }
+    await wall.clock.fastForward(12_500);
+    await wall.waitForTimeout(1200);
+  }
   await wall.close();
 
   // ---------- phone companion, 390x844 ----------

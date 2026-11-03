@@ -12,6 +12,7 @@ import {
   sourceMemberIds,
 } from '../services/google.js';
 import { getGeminiApiKey } from '../services/recipes.js';
+import { getHomeAddress, getMapsApiKey, resetDriveCache, scheduleDriveRefresh } from '../services/driveTimes.js';
 import { categoryForEvent, isEventCategory } from '../../shared/eventCategories.js';
 import { orderAisles } from '../../shared/groceryClassifier.js';
 import type { AppSettings, CalendarSource, FamilyMember, GoogleAccountInfo } from '../../shared/types.js';
@@ -70,6 +71,8 @@ export function loadAppSettings(): AppSettings & {
     googleClientId: oauth.clientId,
     googleClientSecretConfigured: Boolean(oauth.clientSecret),
     geminiApiKeyConfigured: Boolean(getGeminiApiKey()),
+    mapsApiKeyConfigured: Boolean(getMapsApiKey()),
+    homeAddress: getHomeAddress(),
     lastBackupAt: map.lastBackupAt ? String(map.lastBackupAt) : null,
   };
 }
@@ -83,6 +86,7 @@ settingsRouter.put('/', async (c) => {
     Partial<AppSettings> & {
       googleClientSecret?: string;
       geminiApiKey?: string;
+      googleMapsApiKey?: string;
       nightModeBrightness?: number;
       weatherRefreshMinutes?: number;
     }
@@ -113,6 +117,7 @@ settingsRouter.put('/', async (c) => {
     'groceryAisleOrder',
     'defaultGroceryListId',
     'googleClientId',
+    'homeAddress',
   ] as const;
 
   for (const key of allowedKeys) {
@@ -125,6 +130,13 @@ settingsRouter.put('/', async (c) => {
   }
   if (typeof body.geminiApiKey === 'string') {
     upsert.run('geminiApiKey', JSON.stringify(body.geminiApiKey.trim()));
+  }
+  if (typeof body.googleMapsApiKey === 'string') {
+    upsert.run('googleMapsApiKey', JSON.stringify(body.googleMapsApiKey.trim()));
+  }
+  if (typeof body.googleMapsApiKey === 'string' || typeof body.homeAddress === 'string') {
+    scheduleDriveRefresh(); // new key or new home: look up drive times again
+    broadcastInvalidate(['events']);
   }
 
   broadcastInvalidate(['settings']);
@@ -143,6 +155,7 @@ settingsRouter.get('/backups', (c) => c.json(listBackups()));
 settingsRouter.post('/backups/:name/restore', (c) => {
   try {
     const result = restoreBackup(c.req.param('name'));
+    resetDriveCache();
     broadcastInvalidate(['family', 'events', 'chores', 'lists', 'meals', 'recipes', 'photos', 'settings', 'countdowns', 'rewards', 'routines', 'habits']);
     return c.json({ ok: true, ...result });
   } catch (err) {

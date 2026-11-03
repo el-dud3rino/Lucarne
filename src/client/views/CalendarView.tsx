@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Car,
@@ -17,6 +17,8 @@ import {
 import { CountdownStrip, CountdownsSheet } from '../components/Countdowns.js';
 import { MagicImportSheet } from '../components/MagicImport.js';
 import { apiFetch } from '../lib/api.js';
+import { PlaceInput } from '../components/PlaceInput.js';
+import { isFullAddress } from '../../shared/driveTime.js';
 import { eventLook, memberSwatch } from '../lib/eventColors.js';
 import { DayWeather, useDailyForecast } from '../lib/weather.js';
 import { CATEGORY_STYLES, EVENT_CATEGORIES, type EventCategory } from '../../shared/eventCategories.js';
@@ -319,7 +321,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             <Car className="w-3 h-3 shrink-0" />
             <span className="truncate">
               {ev.driverMemberId && memberMap.get(ev.driverMemberId) ? `${memberMap.get(ev.driverMemberId)!.name} driving` : 'Drive'}
-              {ev.travelMinutes ? ` · leave ${formatTimeShort(new Date(Date.parse(ev.startIso) - ev.travelMinutes * 60_000).toISOString())}` : ''}
+              {ev.travelMinutes ? ` · ${formatDrive(ev.travelMinutes)} · leave ${formatTimeShort(new Date(Date.parse(ev.startIso) - ev.travelMinutes * 60_000).toISOString())}` : ''}
             </span>
           </div>
         )}
@@ -677,6 +679,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         <EventModal
           draft={editingEvent}
           members={members}
+          mapsEnabled={Boolean(settings.mapsApiKeyConfigured)}
           onClose={() => setEditingEvent(null)}
           onSave={(updated) => saveMutation.mutate(updated)}
           onDelete={
@@ -721,9 +724,19 @@ interface EventModalProps {
   onDelete?: () => void;
   saving: boolean;
   onCountdown: (ev: Partial<CalendarEvent>) => void;
+  /** Google Maps key set: place search + automatic drive time */
+  mapsEnabled: boolean;
 }
 
 const TRAVEL_CHOICES = [0, 10, 15, 20, 30, 45, 60];
+
+/** "45 min", "2 h", "6 h 30 min" */
+export function formatDrive(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m ? `${h} h ${m} min` : `${h} h`;
+}
 
 const EventModal: React.FC<EventModalProps> = ({
   draft,
@@ -733,9 +746,29 @@ const EventModal: React.FC<EventModalProps> = ({
   onDelete,
   saving,
   onCountdown,
+  mapsEnabled,
 }) => {
   const readOnly = Boolean(draft.icsFeedId);
-  const [travelMinutes, setTravelMinutes] = useState<number>(draft.travelMinutes ?? 0);
+  // The manual override: null = automatic (Google Maps), 0 = no drive, n = n minutes.
+  const [travelMinutes, setTravelMinutes] = useState<number | null>(
+    draft.travelManualMinutes !== undefined ? draft.travelManualMinutes : draft.id ? draft.travelMinutes ?? null : null
+  );
+  const isCustomTravel = travelMinutes != null && travelMinutes > 0 && !TRAVEL_CHOICES.includes(travelMinutes);
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customH, setCustomH] = useState(isCustomTravel ? Math.floor(travelMinutes! / 60) : 1);
+  const [customM, setCustomM] = useState(isCustomTravel ? travelMinutes! % 60 : 30);
+  const setCustom = (h: number, m: number) => {
+    const hh = Math.min(24, Math.max(0, Math.floor(h || 0)));
+    const mm = Math.min(59, Math.max(0, Math.floor(m || 0)));
+    setCustomH(hh);
+    setCustomM(mm);
+    setTravelMinutes(Math.min(1440, hh * 60 + mm) || 0);
+  };
+  const [autoDrive, setAutoDrive] = useState<{ minutes: number | null; error: string | null; loading: boolean }>({
+    minutes: draft.travelAutoMinutes ?? null,
+    error: null,
+    loading: false,
+  });
   const [driverMemberId, setDriverMemberId] = useState<string | null>(draft.driverMemberId ?? null);
   const initialStart = draft.startIso ? new Date(draft.startIso) : new Date();
   const initialEnd = draft.endIso ? new Date(draft.endIso) : new Date(initialStart.getTime() + 3600_000);
@@ -805,10 +838,35 @@ const EventModal: React.FC<EventModalProps> = ({
       endIso,
       recurrenceRule: recurrenceRule === 'none' ? null : (recurrenceRule as any),
       memberIds,
-      travelMinutes: allDay ? null : travelMinutes || null,
+      travelMinutes: allDay ? null : travelMinutes,
       driverMemberId,
     });
   };
+
+  // Live Google Maps drive-time estimate for the address being typed (cached on the server per address).
+  useEffect(() => {
+    if (!mapsEnabled || allDay || !isFullAddress(location)) return;
+    let cancelled = false;
+    setAutoDrive((p) => ({ ...p, loading: true }));
+    const t = setTimeout(async () => {
+      const [y, mo, d] = dateStr.split('-').map(Number);
+      const [h, mi] = startTime.split(':').map(Number);
+      const startIso = new Date(y, (mo || 1) - 1, d || 1, h || 0, mi || 0).toISOString();
+      try {
+        const r = await apiFetch<{ minutes: number | null; error: string | null }>('/api/maps/drive', {
+          method: 'POST',
+          body: JSON.stringify({ location: location.trim(), startIso }),
+        });
+        if (!cancelled) setAutoDrive({ minutes: r.minutes, error: r.error, loading: false });
+      } catch (err) {
+        if (!cancelled) setAutoDrive({ minutes: null, error: (err as Error).message, loading: false });
+      }
+    }, 1500); // wait for typing to pause, so partial addresses aren't looked up
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [mapsEnabled, allDay, location, dateStr, startTime]);
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-start md:items-center justify-center p-4 overflow-y-auto">
@@ -1008,12 +1066,13 @@ const EventModal: React.FC<EventModalProps> = ({
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <input
-            type="text"
+          <PlaceInput
             value={location}
-            onChange={(e) => setLocation(e.target.value)}
-            placeholder="Location (optional)"
+            onChange={setLocation}
+            enabled={mapsEnabled && !readOnly}
+            placeholder={mapsEnabled ? 'Location (search a place)' : 'Location (optional)'}
             className="w-full h-12 px-4 rounded-xl bg-stone-50 border border-stone-200 text-sm font-medium"
+            testId="event-location"
           />
           <input
             type="text"
@@ -1031,19 +1090,93 @@ const EventModal: React.FC<EventModalProps> = ({
               Getting there <span className="normal-case font-semibold">(only on Lucarne)</span>
             </label>
             <div className="flex flex-wrap gap-2">
+              {mapsEnabled && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTravelMinutes(null);
+                    setCustomOpen(false);
+                  }}
+                  data-testid="travel-auto"
+                  title="Drive time from home from Google Maps, with predicted traffic"
+                  className={`h-10 min-h-[40px] px-3 rounded-xl text-xs font-bold border transition flex items-center gap-1 ${
+                    travelMinutes === null ? 'bg-sky-600 text-white border-sky-600' : 'bg-stone-50 text-slate-700 border-stone-200'
+                  }`}
+                >
+                  <Car className="w-3.5 h-3.5" />
+                  {!isFullAddress(location)
+                    ? 'Auto (needs a full address)'
+                    : autoDrive.loading
+                    ? 'Auto · checking…'
+                    : autoDrive.minutes
+                    ? `Auto · ${formatDrive(autoDrive.minutes)}`
+                    : 'Auto (no estimate)'}
+                </button>
+              )}
               {TRAVEL_CHOICES.map((m) => (
                 <button
                   key={m}
                   type="button"
-                  onClick={() => setTravelMinutes(m)}
+                  onClick={() => {
+                    setTravelMinutes(m);
+                    setCustomOpen(false);
+                  }}
                   className={`h-10 min-h-[40px] px-3 rounded-xl text-xs font-bold border transition ${
-                    travelMinutes === m ? 'bg-sky-600 text-white border-sky-600' : 'bg-stone-50 text-slate-700 border-stone-200'
+                    travelMinutes === m || (!mapsEnabled && m === 0 && travelMinutes === null)
+                      ? 'bg-sky-600 text-white border-sky-600'
+                      : 'bg-stone-50 text-slate-700 border-stone-200'
                   }`}
                 >
                   {m === 0 ? 'No drive' : `${m} min drive`}
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomOpen(true);
+                  if (!isCustomTravel) setTravelMinutes(Math.max(1, customH * 60 + customM) || 90);
+                }}
+                data-testid="travel-custom"
+                className={`h-10 min-h-[40px] px-3 rounded-xl text-xs font-bold border transition ${
+                  isCustomTravel || customOpen ? 'bg-sky-600 text-white border-sky-600' : 'bg-stone-50 text-slate-700 border-stone-200'
+                }`}
+              >
+                {isCustomTravel ? `${formatDrive(travelMinutes!)} drive` : 'Custom…'}
+              </button>
             </div>
+            {(customOpen || isCustomTravel) && (
+              <div className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-700">
+                <span className="text-xs text-stone-500">Custom drive:</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  max={24}
+                  value={customH}
+                  onChange={(e) => setCustom(Number(e.target.value), customM)}
+                  className="w-16 h-10 px-2 rounded-xl bg-stone-50 border border-stone-200 text-center"
+                  aria-label="Hours"
+                  data-testid="travel-custom-hours"
+                />
+                <span>h</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  max={59}
+                  step={5}
+                  value={customM}
+                  onChange={(e) => setCustom(customH, Number(e.target.value))}
+                  className="w-16 h-10 px-2 rounded-xl bg-stone-50 border border-stone-200 text-center"
+                  aria-label="Minutes"
+                  data-testid="travel-custom-minutes"
+                />
+                <span>min</span>
+              </div>
+            )}
+            {mapsEnabled && travelMinutes === null && autoDrive.error && isFullAddress(location) && (
+              <div className="text-xs font-semibold text-amber-700">{autoDrive.error}</div>
+            )}
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs font-bold text-stone-500 flex items-center gap-1">
                 <Car className="w-3.5 h-3.5" /> Driver:

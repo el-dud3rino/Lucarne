@@ -6,8 +6,9 @@ const DATA_DIR = path.resolve(process.env.DATA_DIR || './data');
 export const BACKUPS_DIR = path.join(DATA_DIR, 'backups');
 export const MEDIA_PHOTOS_DIR = path.join(DATA_DIR, 'media', 'photos');
 export const MEDIA_RECIPES_DIR = path.join(DATA_DIR, 'media', 'recipes');
+export const MEDIA_ART_DIR = path.join(DATA_DIR, 'media', 'art');
 
-for (const dir of [DATA_DIR, BACKUPS_DIR, MEDIA_PHOTOS_DIR, MEDIA_RECIPES_DIR]) {
+for (const dir of [DATA_DIR, BACKUPS_DIR, MEDIA_PHOTOS_DIR, MEDIA_RECIPES_DIR, MEDIA_ART_DIR]) {
   fs.mkdirSync(dir, { recursive: true });
 }
 

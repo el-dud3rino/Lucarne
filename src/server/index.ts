@@ -8,7 +8,7 @@ import { stream } from 'hono/streaming';
 import { serve } from '@hono/node-server';
 import { initSchema } from './db/schema.js';
 import { seedIfNeeded } from './db/seed.js';
-import { MEDIA_PHOTOS_DIR, MEDIA_RECIPES_DIR, backupIfDue, db } from './db/connection.js';
+import { MEDIA_ART_DIR, MEDIA_PHOTOS_DIR, MEDIA_RECIPES_DIR, backupIfDue, db } from './db/connection.js';
 import { registerSSEClient } from './sse.js';
 import { familyRouter } from './routes/family.js';
 import { eventsRouter } from './routes/events.js';
@@ -27,6 +27,9 @@ import { rewardsRouter } from './routes/rewards.js';
 import { routinesRouter } from './routes/routines.js';
 import { feedsRouter } from './routes/feeds.js';
 import { todayRouter } from './routes/today.js';
+import { artRouter } from './routes/art.js';
+import { mapsRouter } from './routes/maps.js';
+import { refreshUpcomingDriveTimes } from './services/driveTimes.js';
 
 initSchema();
 seedIfNeeded();
@@ -124,12 +127,15 @@ app.route('/api/rewards', rewardsRouter);
 app.route('/api/routines', routinesRouter);
 app.route('/api/feeds', feedsRouter);
 app.route('/api/today', todayRouter);
+app.route('/api/art', artRouter);
+app.route('/api/maps', mapsRouter);
 
 // Serve locally cached media (photos & recipe images) with immutable cache headers for 0ms repeat loads
 app.get('/media/:bucket/:file', (c) => {
   const bucket = c.req.param('bucket');
   const file = path.basename(c.req.param('file'));
-  const baseDir = bucket === 'photos' ? MEDIA_PHOTOS_DIR : bucket === 'recipes' ? MEDIA_RECIPES_DIR : null;
+  const baseDir =
+    bucket === 'photos' ? MEDIA_PHOTOS_DIR : bucket === 'recipes' ? MEDIA_RECIPES_DIR : bucket === 'art' ? MEDIA_ART_DIR : null;
   if (!baseDir) return c.notFound();
 
   const fullPath = path.join(baseDir, file);
@@ -206,6 +212,10 @@ const runBackupIfDue = () => {
 };
 setTimeout(runBackupIfDue, 60_000).unref();
 setInterval(runBackupIfDue, 30 * 60 * 1000).unref();
+
+// Google Maps drive times for the coming week's events (no-op without a Maps key + home address)
+setTimeout(() => refreshUpcomingDriveTimes().catch(() => {}), 10_000).unref();
+setInterval(() => refreshUpcomingDriveTimes().catch(() => {}), 15 * 60 * 1000).unref();
 
 const port = Number(process.env.PORT || 3001);
 serve({ fetch: app.fetch, port, hostname: '0.0.0.0' }, (info) => {

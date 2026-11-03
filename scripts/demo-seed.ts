@@ -8,6 +8,7 @@
  * Photos are free-to-use Unsplash images (already used by Lucarne's starter seed).
  */
 import fs from 'node:fs';
+import { addressKey } from '../src/shared/driveTime.js';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
@@ -114,11 +115,11 @@ runTransaction(() => {
   ev('Book Club', at(1, 19, 30), at(1, 21, 0), [MOM], { loc: "Jen's house" });
   ev('Leo: Science Museum Field Trip', allDay(2).start, allDay(2).end, [LEO], { allDay: true, desc: 'Packed lunch, no peanuts' });
   ev('Team Standup (WFH)', at(2, 9, 0), at(2, 9, 30), [MOM]);
-  ev('Haircuts', at(2, 15, 45), at(2, 16, 30), [LEO, MAYA], { loc: 'Snip-its' });
+  ev('Haircuts', at(2, 15, 45), at(2, 16, 30), [LEO, MAYA], { loc: 'Snip-its, 2730 S Colorado Blvd, Denver, CO 80222' });
   ev('Grandma visiting', allDay(3).start, allDay(5).end, [FAMILY], { allDay: true });
   ev('Parent–Teacher Conference', at(3, 16, 0), at(3, 16, 30), [MOM, DAD, MAYA], { loc: 'Oak Elementary, Room 12' });
   ev('Pizza & Game Night', at(4, 18, 0), at(4, 20, 0), [FAMILY]);
-  ev('Vet: Biscuit annual checkup', at(5, 10, 0), at(5, 10, 45), [DAD], { loc: 'Cherry Creek Animal Clinic' });
+  ev('Vet: Biscuit annual checkup', at(5, 10, 0), at(5, 10, 45), [DAD], { loc: 'Cherry Creek Animal Clinic, 1250 S Colorado Blvd, Denver, CO 80222' });
   ev("Maya's Birthday", allDay(6).start, allDay(6).end, [MAYA], { allDay: true, category: 'birthday' });
   ev("Maya's Birthday Party", at(6, 13, 0), at(6, 15, 0), [FAMILY], { loc: 'Bounce Zone' });
   ev("Grandpa Joe's Birthday", allDay(9).start, allDay(9).end, [FAMILY], { allDay: true, category: 'birthday' });
@@ -216,6 +217,18 @@ runTransaction(() => {
   ).run(crypto.randomUUID(), soon.toISOString(), new Date(soon.getTime() + 45 * 60_000).toISOString(), JSON.stringify([LEO]), nowIso, MOM);
   db.prepare("UPDATE events SET travel_minutes = 15, driver_member_id = ? WHERE title = 'Leo: Soccer Game'").run(DAD);
   db.prepare("UPDATE events SET travel_minutes = 10, driver_member_id = ? WHERE title = 'Maya: Piano Lesson'").run(MOM);
+
+  // Google Maps drive times ("Auto" in the event form). The key is a placeholder that is never sent
+  // anywhere: demo-screenshots.ts points the Maps API addresses at a dead local port, and these
+  // cached drive times are what the screenshots show.
+  set.run('googleMapsApiKey', JSON.stringify('demo-placeholder-not-a-key'));
+  set.run('homeAddress', JSON.stringify('100 Maple St, Denver, CO 80209'));
+  const drive = db.prepare(
+    'INSERT OR REPLACE INTO drive_times (dest_key, home_key, minutes, distance_m, error, computed_at) VALUES (?, ?, ?, ?, NULL, ?)'
+  );
+  const homeKey = addressKey('100 Maple St, Denver, CO 80209');
+  drive.run(addressKey('Snip-its, 2730 S Colorado Blvd, Denver, CO 80222'), homeKey, 9, 4800, nowIso);
+  drive.run(addressKey('Cherry Creek Animal Clinic, 1250 S Colorado Blvd, Denver, CO 80222'), homeKey, 12, 6100, nowIso);
 
   // ---------- countdowns ----------
   const cd = db.prepare('INSERT INTO countdowns (id, title, emoji, date_str, member_id, created_at) VALUES (?, ?, ?, ?, ?, ?)');

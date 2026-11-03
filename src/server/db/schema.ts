@@ -465,6 +465,41 @@ export const migrations: Migration[] = [
       d.exec('CREATE INDEX IF NOT EXISTS idx_events_ics ON events(ics_feed_id)');
     },
   },
+  {
+    version: 10,
+    name: '010_kid_artwork',
+    up: (d: DatabaseSync) => {
+      // Drawings from the Draw tab. No FK to family_members: a picture outlives a renamed/removed member.
+      d.exec(`
+        CREATE TABLE IF NOT EXISTS artworks (
+          id TEXT PRIMARY KEY,
+          member_id TEXT,
+          filename TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_artworks_member ON artworks(member_id, updated_at);
+      `);
+    },
+  },
+  {
+    version: 11,
+    name: '011_drive_times',
+    up: (d: DatabaseSync) => {
+      // Google Maps drive times from home, cached per destination address (not per event: synced
+      // and feed events get rewritten, and many events share one address).
+      d.exec(`
+        CREATE TABLE IF NOT EXISTS drive_times (
+          dest_key TEXT PRIMARY KEY,
+          home_key TEXT NOT NULL,
+          minutes INTEGER,
+          distance_m INTEGER,
+          error TEXT,
+          computed_at TEXT NOT NULL
+        );
+      `);
+    },
+  },
 ];
 
 export function initSchema(): void {

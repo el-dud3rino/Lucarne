@@ -17,7 +17,8 @@ export type RealtimeTopic =
   | 'countdowns'
   | 'rewards'
   | 'routines'
-  | 'habits';
+  | 'habits'
+  | 'art';
 
 export function registerSSEClient(id: string, send: (chunk: string) => void): () => void {
   clients.set(id, { id, send });

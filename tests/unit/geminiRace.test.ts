@@ -77,6 +77,17 @@ test('stuck model (no output) is given up on and the next one used, even with on
   assert.deepEqual(busy, ['a']);
 });
 
+test('the last model left is not abandoned for being slow: it gets until the deadline', async () => {
+  // Under heavy load a working model can take longer than the stuck timeout just to start answering.
+  const f = fakeModels({
+    a: { kind: 'fail', afterMs: 5, message: BUSY },
+    b: { kind: 'ok', firstChunkMs: 300, doneMs: 350 },
+  });
+  const result = await raceGeminiModels(['a', 'b'], f.attempt, { ...fast, maxInFlight: 1 });
+  assert.equal(result, 'result from b');
+  assert.deepEqual(f.aborted, []);
+});
+
 test('retired model is remembered; a non-retryable error (bad key) stops immediately', async () => {
   const retired: string[] = [];
   const f1 = fakeModels({

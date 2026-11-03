@@ -5,7 +5,8 @@ import { apiFetch } from '../lib/api.js';
 import { formatTimeShort } from '../lib/dates.js';
 import { WeatherWidget } from '../components/WeatherWidget.js';
 import { TodayBrief } from '../components/TodayBrief.js';
-import type { AppSettings, CalendarEvent, PhotoItem } from '../../shared/types.js';
+import { artworksToPhotos, mixArtIntoSlides } from '../lib/artRotation.js';
+import type { AppSettings, Artwork, CalendarEvent, FamilyMember, PhotoItem } from '../../shared/types.js';
 
 interface ScreensaverProps {
   active: boolean;
@@ -126,6 +127,19 @@ export const ScreensaverOverlay: React.FC<ScreensaverProps> = ({
 
   const photos = rawPhotos.length > 0 ? rawPhotos : FALLBACK_PHOTOS;
 
+  // Kids' drawings from the Draw tab: one slips in every 10–15 photos.
+  const { data: artworks = [] } = useQuery({
+    queryKey: ['art'],
+    queryFn: () => apiFetch<Artwork[]>('/api/art'),
+    enabled: active,
+  });
+  const { data: members = [] } = useQuery({
+    queryKey: ['family'],
+    queryFn: () => apiFetch<FamilyMember[]>('/api/family'),
+    enabled: active,
+  });
+  const artPhotos = useMemo(() => artworksToPhotos(artworks, members), [artworks, members]);
+
   const { data: upcomingEvents = [] } = useQuery({
     queryKey: ['events', 'screensaver-upcoming'],
     queryFn: () => {
@@ -143,7 +157,10 @@ export const ScreensaverOverlay: React.FC<ScreensaverProps> = ({
   useEffect(() => {
     if (active) setShuffleSeed(Math.random());
   }, [active]);
-  const slides = useMemo(() => pairPhotos(shufflePhotos(photos, shuffleSeed)), [photos, shuffleSeed]);
+  const slides = useMemo(
+    () => mixArtIntoSlides(pairPhotos(shufflePhotos(photos, shuffleSeed)), artPhotos, shuffleSeed),
+    [photos, artPhotos, shuffleSeed]
+  );
 
   // Synchronize slide layers when slides change
   useEffect(() => {
@@ -220,6 +237,19 @@ export const ScreensaverOverlay: React.FC<ScreensaverProps> = ({
 
   const renderSlideContent = (slide: PhotoItem[]) => {
     if (!slide || slide.length === 0) return null;
+
+    if (slide.length === 1 && slide[0].source === 'art') {
+      // A kid's drawing, hung like a framed picture on a warm wall
+      const art = slide[0];
+      return (
+        <div className="relative w-full h-full overflow-hidden flex flex-col items-center justify-start bg-gradient-to-br from-amber-100 via-orange-50 to-rose-100 px-10 pt-[6vh]">
+          <div className="max-w-full max-h-full p-4 bg-white rounded-xl shadow-2xl ring-[14px] ring-amber-700/80">
+            <img src={art.url} alt={art.caption} className="max-h-[55vh] max-w-full object-contain block" />
+          </div>
+          <div className="mt-8 px-5 py-2 rounded-full bg-white/85 text-amber-900 text-2xl font-black shadow">{art.caption}</div>
+        </div>
+      );
+    }
 
     if (slide.length === 1) {
       const photo = slide[0];

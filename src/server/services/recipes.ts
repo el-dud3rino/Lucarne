@@ -162,7 +162,15 @@ async function resolveGeminiModels(ai: GoogleGenAI, task: GeminiTask = 'heavy'):
   const lite = rankLiteModels(cachedModelNames);
   const flashList = flash.length > 0 ? flash : [FALLBACK_GEMINI_MODEL];
   const liteList = lite.length > 0 ? lite : [FALLBACK_LITE_MODEL];
-  const ranked = task === 'light' ? [...liteList, ...flashList] : [...flashList, ...liteList];
+  // Only MAX_MODELS_TO_TRY get a turn, so make sure the other tier's best model is among them:
+  // when every recent Flash model is overloaded, Lite is often still answering (and vice versa).
+  const withFallback = (primary: string[], fallback: string[]) => [
+    ...primary.slice(0, MAX_MODELS_TO_TRY - 1),
+    ...fallback.slice(0, 1),
+    ...primary.slice(MAX_MODELS_TO_TRY - 1),
+    ...fallback.slice(1),
+  ];
+  const ranked = task === 'light' ? withFallback(liteList, flashList) : withFallback(flashList, liteList);
 
   const now = Date.now();
   const list = orderGeminiModels(ranked, {
@@ -228,7 +236,9 @@ function isTimeoutError(err: unknown): boolean {
 }
 
 const HEDGE_AFTER_MS = 8_000; // no response yet -> also start the next model
-const FIRST_CHUNK_TIMEOUT_MS = 20_000; // a model that hasn't started answering by now is stuck
+// A model that hasn't started answering by now is treated as stuck, but only while another model is
+// left to try: under heavy load a working model can take 15-30 s to start, and waiting beats failing.
+const FIRST_CHUNK_TIMEOUT_MS = 30_000;
 const MAX_IN_FLIGHT = 2;
 
 export interface RaceOptions {
@@ -298,9 +308,12 @@ export function raceGeminiModels<T>(
 
       // Hedge: still silent after hedgeAfterMs -> start the next model alongside.
       entry.timers.push(setTimeout(() => !entry.started && launch(), hedgeAfterMs));
-      // Stuck: still silent after firstChunkTimeoutMs -> give up on this model.
+      // Stuck: still silent after firstChunkTimeoutMs -> give up on it, if another model is left to try.
+      // If it's the last hope it keeps going until the overall deadline.
       entry.timers.push(
-        setTimeout(() => !entry.started && ctrl.abort(new Error('Gemini model timed out (no response)')), firstChunkTimeoutMs)
+        setTimeout(() => {
+          if (!entry.started && next < models.length) ctrl.abort(new Error('Gemini model timed out (no response)'));
+        }, firstChunkTimeoutMs)
       );
 
       attempt(model, ctrl.signal, () => {
@@ -806,6 +819,83 @@ function isLikelyBlocked(url: string): boolean {
   return (blockedRecipeHosts.get(host) ?? 0) > Date.now();
 }
 
+/**
+ * Food blogs that publish full recipes (with schema.org data) and run WordPress, whose public search
+ * API (/wp-json/wp/v2/search) returns their real post links. This is the primary meal-search source:
+ * fast, free, and every link exists, unlike URLs a model remembers (Flash-Lite invents most of them).
+ */
+export const RECIPE_BLOGS = [
+  'www.recipetineats.com', 'pinchofyum.com', 'www.wellplated.com', 'natashaskitchen.com', 'www.gimmesomeoven.com',
+  'www.twopeasandtheirpod.com', 'www.dinneratthezoo.com', 'carlsbadcravings.com', 'chefsavvy.com', 'cafedelites.com',
+  'realfoodwholelife.com', 'www.loveandlemons.com', 'www.inspiredtaste.net', 'www.averiecooks.com', 'www.spendwithpennies.com',
+];
+
+/** Real recipe links for a query from the blogs' WordPress search, interleaved so results come from different sites. */
+export async function wordpressRecipeLinks(
+  query: string,
+  opts: { fetchFn?: typeof fetch; perSite?: number; timeoutMs?: number; sites?: string[] } = {}
+): Promise<Array<{ title: string; url: string }>> {
+  const fetchFn = opts.fetchFn ?? fetch;
+  const sites = (opts.sites ?? RECIPE_BLOGS).filter((h) => !isLikelyBlocked(`https://${h}/`));
+  const perSite = await Promise.all(
+    sites.map(async (host) => {
+      try {
+        const url =
+          `https://${host}/wp-json/wp/v2/search?search=${encodeURIComponent(query)}` +
+          `&per_page=${opts.perSite ?? 3}&type=post&_fields=title,url`;
+        const res = await fetchFn(url, {
+          headers: { Accept: 'application/json', 'User-Agent': 'Lucarne/0.1 (family meal planner)' },
+          signal: AbortSignal.timeout(opts.timeoutMs ?? 8000),
+        });
+        if (!res.ok) return [];
+        const items = (await res.json()) as Array<{ title?: string; url?: string }>;
+        return Array.isArray(items)
+          ? items
+              .filter((i) => typeof i.url === 'string' && /^https?:\/\//.test(i.url))
+              .map((i) => ({ title: String(i.title || ''), url: i.url as string }))
+          : [];
+      } catch {
+        return []; // site down / slow / not WordPress any more: just skip it
+      }
+    })
+  );
+  const out: Array<{ title: string; url: string }> = [];
+  for (let i = 0; perSite.some((list) => i < list.length); i++) {
+    for (const list of perSite) if (list[i]) out.push(list[i]);
+  }
+  return out;
+}
+
+const FILLER_WORDS = new Set([
+  'easy', 'best', 'quick', 'simple', 'recipe', 'recipes', 'homemade', 'the', 'a', 'an', 'and', 'with', 'for', 'of', 'my', 'to', 'in',
+]);
+const normWord = (w: string) => w.replace(/(ies)$/, 'y').replace(/(es|s)$/, '');
+const wordsOf = (text: string) =>
+  text
+    .toLowerCase()
+    .replace(/&#?\w+;/g, ' ')
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w && !FILLER_WORDS.has(w))
+    .map(normWord);
+
+/**
+ * Orders candidate links so recipes whose TITLE matches the search come first (blog search also
+ * matches words buried in a post's text, e.g. "chicken tacos" finding a Cajun chicken recipe).
+ * Ties keep their original order, so results still alternate between sites.
+ */
+export function rankByTitleMatch<T extends { title: string; url: string }>(query: string, links: T[]): T[] {
+  const want = [...new Set(wordsOf(query))];
+  if (want.length === 0) return links;
+  const score = (l: T) => {
+    const have = new Set(wordsOf(`${l.title} ${l.url.replace(/^https?:\/\/[^/]+/, '')}`));
+    return want.filter((w) => have.has(w)).length / want.length;
+  };
+  return links
+    .map((l, i) => ({ l, i, s: score(l) }))
+    .sort((a, b) => b.s - a.s || a.i - b.i)
+    .map((x) => x.l);
+}
+
 /** Pulls {title,url} candidates out of a model reply (JSON array, possibly wrapped in prose/code fences). */
 export function parseCandidateLinks(text: string): Array<{ title: string; url: string }> {
   const out: Array<{ title: string; url: string }> = [];
@@ -861,53 +951,66 @@ async function geminiCandidateLinks(ai: GoogleGenAI, query: string): Promise<Arr
 }
 
 /**
- * Meal search that only returns REAL recipes: Gemini proposes recipe page links, then each page is
- * opened with the URL importer and kept only if it really is a recipe page that can be read
+ * Meal search that only returns REAL recipes: candidate links come from food blogs' own search (and,
+ * if that finds too few, from Gemini), then each page is opened with the URL importer and kept only if it really is a recipe page that can be read
  * (made-up links, non-recipe pages and sites that block downloads are dropped). Photo, ingredients,
  * steps and nutrition all come from the page itself.
  */
 export async function searchOrGenerateMealsWithGemini(query: string, want = 3): Promise<FoundRecipe[]> {
-  const apiKey = getGeminiApiKey();
-  if (!apiKey) {
-    throw new Error('Configure your Gemini API Key in Settings to use AI Meal Search & Recipe Discovery.');
-  }
-  const ai = new GoogleGenAI({ apiKey });
-  const candidates = await geminiCandidateLinks(ai, query);
-
-  const seen = new Set<string>();
-  const queue = candidates
-    .map((c) => c.url.split('#')[0])
-    .filter((u) => {
-      if (seen.has(u) || isLikelyBlocked(u)) return false;
-      seen.add(u);
-      return true;
-    })
-    .slice(0, 10);
-
   const found: FoundRecipe[] = [];
   const foundUrls = new Set<string>();
-  let next = 0;
-  const worker = async () => {
-    while (next < queue.length && found.length < want) {
-      const url = queue[next++];
-      try {
-        const r = await extractRecipeFromUrl(url, { preview: true });
-        if (!r.title || r.ingredients.length === 0 || r.instructions.length === 0) continue;
-        if (foundUrls.has(r.sourceUrl || url)) continue;
-        foundUrls.add(r.sourceUrl || url);
-        const alreadySaved = Boolean(
-          db.prepare('SELECT 1 FROM recipes WHERE source_url = ? OR source_url = ? LIMIT 1').get(url, r.sourceUrl || url)
-        );
-        if (found.length < want) found.push({ ...r, site: hostOf(r.sourceUrl || url), alreadySaved });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (/\((401|403|429)\)/.test(msg)) blockedRecipeHosts.set(hostOf(url), Date.now() + BLOCKED_HOST_COOLDOWN_MS);
+  const tried = new Set<string>();
+
+  /** Opens each candidate page and keeps the ones that really are readable recipes. */
+  const verify = async (candidates: Array<{ url: string }>) => {
+    const queue = candidates
+      .map((c) => c.url.split('#')[0])
+      .filter((u) => {
+        if (tried.has(u) || isLikelyBlocked(u)) return false;
+        tried.add(u);
+        return true;
+      })
+      .slice(0, 16);
+    let next = 0;
+    const worker = async () => {
+      while (next < queue.length && found.length < want) {
+        const url = queue[next++];
+        try {
+          const r = await extractRecipeFromUrl(url, { preview: true });
+          if (!r.title || r.ingredients.length === 0 || r.instructions.length === 0) continue;
+          if (foundUrls.has(r.sourceUrl || url)) continue;
+          foundUrls.add(r.sourceUrl || url);
+          const alreadySaved = Boolean(
+            db.prepare('SELECT 1 FROM recipes WHERE source_url = ? OR source_url = ? LIMIT 1').get(url, r.sourceUrl || url)
+          );
+          if (found.length < want) found.push({ ...r, site: hostOf(r.sourceUrl || url), alreadySaved });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (/\((401|403|429)\)/.test(msg)) blockedRecipeHosts.set(hostOf(url), Date.now() + BLOCKED_HOST_COOLDOWN_MS);
+        }
       }
-    }
+    };
+    await Promise.all(Array.from({ length: 4 }, worker));
   };
-  await Promise.all(Array.from({ length: 4 }, worker));
+
+  // 1. Real links from food blogs' own search (no Gemini needed, no quota used).
+  // Blog search wants every word to appear, so leave out filler like "easy" or "best".
+  const blogQuery = query.split(/\s+/).filter((w) => !FILLER_WORDS.has(w.toLowerCase())).join(' ') || query;
+  await verify(rankByTitleMatch(query, await wordpressRecipeLinks(blogQuery)));
+
+  // 2. Not enough? Ask Gemini for more links (also verified page by page).
+  let geminiError: unknown = null;
+  const apiKey = getGeminiApiKey();
+  if (found.length < want && apiKey) {
+    try {
+      await verify(await geminiCandidateLinks(new GoogleGenAI({ apiKey }), query));
+    } catch (err) {
+      geminiError = err;
+    }
+  }
 
   if (found.length === 0) {
+    if (geminiError) throw geminiError instanceof Error ? geminiError : new Error(String(geminiError));
     throw new Error(
       `Couldn't find recipe pages Lucarne can read for "${query}". Try different words, or paste a recipe link in the "Strip Recipe Website URL" tab.`
     );

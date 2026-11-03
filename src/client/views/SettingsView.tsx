@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '../lib/api.js';
 import { timeAgo } from '../lib/time.js';
+import { geocodePlace } from '../lib/geocode.js';
 import { EmojiPickerButton } from '../components/EmojiPicker.js';
 import { SharedAlbumsSection } from '../components/SharedAlbumsSection.js';
 import { CATEGORY_STYLES, EVENT_CATEGORIES, type EventCategory } from '../../shared/eventCategories.js';
@@ -32,6 +33,7 @@ import { WeatherWidget } from '../components/WeatherWidget.js';
 import { KeepSyncSection } from '../components/KeepSyncSection.js';
 import { CalendarFeedsSection } from '../components/CalendarFeedsSection.js';
 import { BackupsSection } from '../components/BackupsSection.js';
+import { MapsSection } from '../components/MapsSection.js';
 import {
   SKYLIGHT_COLOR_PRESETS,
   type AppSettings,
@@ -64,6 +66,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, members })
 
   // Weather state
   const [weatherCityInput, setWeatherCityInput] = useState(settings.weatherLocationName || '');
+  const [weatherLookupBusy, setWeatherLookupBusy] = useState(false);
+  /** Looks up the typed place and saves its coordinates (the forecast uses lat/lon, not the name). */
+  const updateWeatherLocation = async () => {
+    setWeatherLookupBusy(true);
+    try {
+      const place = await geocodePlace(weatherCityInput);
+      updateSettingsMutation.mutate({ weatherLocationName: place.label, weatherLat: place.lat, weatherLon: place.lon });
+      setWeatherCityInput(place.label);
+    } catch (err) {
+      showError(err);
+    } finally {
+      setWeatherLookupBusy(false);
+    }
+  };
 
   // Photo delete confirmation state
   const [confirmDeletePhotoId, setConfirmDeletePhotoId] = useState<string | null>(null);
@@ -687,19 +703,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, members })
                 type="text"
                 value={weatherCityInput}
                 onChange={(e) => setWeatherCityInput(e.target.value)}
-                placeholder="City name (e.g. San Francisco, New York)..."
+                placeholder="City, State (e.g. Springfield, IL)"
                 className="flex-1 h-11 min-h-[40px] px-3.5 rounded-xl bg-stone-50 border border-stone-200 font-semibold text-sm"
               />
               <button
                 type="button"
-                onClick={() =>
-                  updateSettingsMutation.mutate({
-                    weatherLocationName: weatherCityInput.trim() || settings.weatherLocationName,
-                  })
-                }
-                className="px-4 h-11 min-h-[40px] min-w-[40px] rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center"
+                onClick={() => void updateWeatherLocation()}
+                disabled={weatherLookupBusy || !weatherCityInput.trim()}
+                className="disabled:opacity-50 px-4 h-11 min-h-[40px] min-w-[40px] rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center"
               >
-                Update
+                {weatherLookupBusy ? 'Finding…' : 'Update'}
               </button>
             </div>
           </div>
@@ -1275,6 +1288,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, members })
             </div>
           </form>
         </section>
+
+        <MapsSection settings={settings} />
 
         {/* 7. Gemini AI Key & SQLite WAL Backups */}
         <section className="bg-white rounded-3xl border border-stone-200 p-5 space-y-4 shadow-2xs">

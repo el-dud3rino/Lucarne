@@ -67,8 +67,16 @@ export interface CalendarEvent {
   originalEventId?: string;
   /** Dates (YYYY-MM-DD) excluded from recurrence projection */
   exceptionDates?: string[];
-  /** Minutes needed to get there; drives the "leave in 15 min" banner (Lucarne-only, not sent to Google) */
+  /**
+   * Minutes needed to get there; drives the "leave in 15 min" banner (Lucarne-only, not sent to Google).
+   * On reads this is the EFFECTIVE value (manual override, else the Google Maps estimate).
+   * On create/update it sets the manual override: null = automatic, 0 = no drive, n = n minutes.
+   */
   travelMinutes?: number | null;
+  /** The manual override as stored: null = automatic, 0 = no drive, n = n minutes */
+  travelManualMinutes?: number | null;
+  /** Google Maps drive time from home (null when unknown, not a full address, or Maps is off) */
+  travelAutoMinutes?: number | null;
   /** Who is driving / taking them (Lucarne-only) */
   driverMemberId?: string | null;
   /** Set for read-only events from a subscribed calendar feed (ICS) */
@@ -359,12 +367,23 @@ export interface MealPlanEntry {
   recipe?: Recipe | null;
 }
 
+/** A drawing made on the Draw tab. Every saved drawing joins the photo slideshow. */
+export interface Artwork {
+  id: string;
+  /** Who drew it (null if that family member was removed) */
+  memberId: string | null;
+  /** PNG under /media/art/ (a new file per save, so the immutable cache never serves a stale version) */
+  url: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface PhotoItem {
   id: string;
   url: string;
   orientation: 'landscape' | 'portrait';
   caption: string;
-  source: 'starter' | 'upload' | 'google_photos' | 'shared_album';
+  source: 'starter' | 'upload' | 'google_photos' | 'shared_album' | 'art';
   /** Set when the photo is mirrored from a shared Google Photos album */
   albumId: string | null;
   createdAt: string;
@@ -408,6 +427,10 @@ export interface AppSettings {
   googleClientId: string;
   googleClientSecretConfigured: boolean;
   geminiApiKeyConfigured: boolean;
+  /** Google Maps key present: place search + automatic drive times */
+  mapsApiKeyConfigured?: boolean;
+  /** Where drive times start from */
+  homeAddress?: string;
   lastBackupAt: string | null;
 }
 

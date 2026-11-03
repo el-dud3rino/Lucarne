@@ -41,11 +41,11 @@ test('Mobile Companion PWA (390x844): Bottom Nav, Responsive Views & Zero Horizo
     const desktopSidebar = page.locator('aside');
     assert.equal(await desktopSidebar.isVisible(), false, 'Desktop sidebar must be hidden on mobile screen');
 
-    // 2. Verify Mobile Bottom Navigation Bar is visible with 6 items
+    // 2. Verify Mobile Bottom Navigation Bar is visible with 7 items
     const mobileBottomNav = page.locator('nav.md\\:hidden');
     assert.equal(await mobileBottomNav.isVisible(), true, 'Mobile bottom nav bar must be visible on mobile screens');
     const navButtons = mobileBottomNav.locator('button');
-    assert.equal(await navButtons.count(), 6, 'Mobile bottom nav bar must contain 6 navigation buttons');
+    assert.equal(await navButtons.count(), 7, 'Mobile bottom nav bar must contain 7 navigation buttons');
 
     // 3. Check Calendar View on mobile
     await page.waitForSelector('text=5-Day');

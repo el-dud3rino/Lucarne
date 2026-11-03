@@ -6,6 +6,7 @@ import {
   House,
   Image as ImageIcon,
   ListChecks,
+  Palette,
   Settings as SettingsIcon,
   UtensilsCrossed,
 } from 'lucide-react';
@@ -19,11 +20,12 @@ import { HomeView } from './views/HomeView.js';
 import { ChoresView } from './views/ChoresView.js';
 import { ListsView } from './views/ListsView.js';
 import { MealsView } from './views/MealsView.js';
+import { DrawView } from './views/DrawView.js';
 import { ScreensaverOverlay } from './views/ScreensaverOverlay.js';
 import { SettingsView } from './views/SettingsView.js';
 import { GROCERY_CATEGORIES, type AppSettings, type FamilyMember } from '../shared/types.js';
 
-type NavTab = 'home' | 'calendar' | 'chores' | 'lists' | 'meals' | 'settings';
+type NavTab = 'home' | 'calendar' | 'chores' | 'lists' | 'meals' | 'draw' | 'settings';
 
 const FALLBACK_SETTINGS: AppSettings = {
   familyName: 'Our Family',
@@ -55,7 +57,7 @@ export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<NavTab>(() => {
     const params = new URLSearchParams(window.location.search);
     const t = params.get('tab');
-    if (t === 'home' || t === 'calendar' || t === 'settings' || t === 'chores' || t === 'lists' || t === 'meals') return t;
+    if (t === 'home' || t === 'calendar' || t === 'settings' || t === 'chores' || t === 'lists' || t === 'meals' || t === 'draw') return t;
     // The wall opens on Home ("today at a glance"); phones open on the calendar.
     return window.matchMedia?.('(min-width: 768px)').matches ? 'home' : 'calendar';
   });
@@ -114,6 +116,7 @@ export const App: React.FC = () => {
     { key: 'chores', label: 'Chores', Icon: CheckSquare },
     { key: 'lists', label: 'Lists', Icon: ListChecks },
     { key: 'meals', label: 'Meals', Icon: UtensilsCrossed },
+    { key: 'draw', label: 'Draw', Icon: Palette },
     { key: 'settings', label: 'Settings', Icon: SettingsIcon },
   ];
 
@@ -262,13 +265,14 @@ export const App: React.FC = () => {
           )}
           {activeTab === 'lists' && <ListsView />}
           {activeTab === 'meals' && <MealsView settings={settings} />}
+          {activeTab === 'draw' && <DrawView members={members} />}
           {activeTab === 'settings' && (
             <SettingsView settings={settings} members={members} />
           )}
         </main>
 
         {/* Mobile Companion PWA Bottom Tab Bar (< 768px phones at the grocery store!) */}
-        <nav className="md:hidden min-h-16 shrink-0 bg-white border-t border-stone-200 grid grid-cols-6 px-1 pb-[env(safe-area-inset-bottom,0px)]">
+        <nav className="md:hidden min-h-16 shrink-0 bg-white border-t border-stone-200 grid grid-cols-7 px-1 pb-[env(safe-area-inset-bottom,0px)]">
           {navItems.map(({ key, label, Icon }) => {
             const active = activeTab === key;
             return (

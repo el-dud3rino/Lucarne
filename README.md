@@ -1,6 +1,6 @@
 # Lucarne
 
-A fast, local-first, open-source family hub for a wall-mounted touchscreen: shared family calendar, chores, routines and rewards, grocery lists, meal planning, and a photo screensaver. It's designed for a **1920×1080 landscape touchscreen** driven by a Raspberry Pi 5 or a small Linux PC, and phones on your home Wi-Fi get a companion app for free.
+A fast, local-first, open-source family hub for a wall-mounted touchscreen: shared family calendar, chores, routines and rewards, grocery lists, meal planning, a drawing pad for the kids, and a photo screensaver. It's designed for a **1920×1080 landscape touchscreen** driven by a Raspberry Pi 5 or a small Linux PC, and phones on your home Wi-Fi get a companion app for free.
 
 Inspired by the Skylight Calendar, but self-hosted: your family's data lives in one SQLite file on your own device. **No subscription:** features that other family displays put behind a yearly plan, like rewards, meal planning, the photo frame and AI import from photos, are all included. *Lucarne is an independent project and is not affiliated with or endorsed by Skylight.*
 
@@ -10,7 +10,7 @@ Inspired by the Skylight Calendar, but self-hosted: your family's data lives in 
 
 <table>
   <tr>
-    <td colspan="2"><img src="docs/screenshots/calendar-5day.jpg" alt="5-day family calendar"><br><sub><b>5-day calendar</b>: shared events are striped in each person's color</sub></td>
+    <td colspan="2"><img src="docs/screenshots/calendar-5day.jpg" alt="5-day family calendar"><br><sub><b>5-day calendar</b>: shared events get a diagonal band of each person's color, and drive times show when to leave</sub></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/screenshots/calendar-month.jpg" alt="Month view with birthdays and holidays"><br><sub><b>Month view</b>: birthdays 🎂 and holidays 🎉 in their own colors</sub></td>
@@ -31,6 +31,14 @@ Inspired by the Skylight Calendar, but self-hosted: your family's data lives in 
   <tr>
     <td><img src="docs/screenshots/meals.jpg" alt="Weekly meal planner"><br><sub><b>Meal planner</b>: send the week's ingredients to the list</sub></td>
     <td><img src="docs/screenshots/cook-mode.jpg" alt="Cook mode"><br><sub><b>Cook Mode</b>: big text, the screen stays awake</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/draw.jpg" alt="Drawing pad with crayons, markers and paint"><br><sub><b>Draw</b>: crayons, markers and paint for little kids, no reading needed</sub></td>
+    <td width="50%"><img src="docs/screenshots/screensaver-art.jpg" alt="A child's drawing framed in the photo slideshow"><br><sub><b>Art in the slideshow</b>: saved drawings join the photo frame, about one per 10–15 photos</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/event-drive.jpg" alt="Event form with Google Maps place and automatic drive time"><br><sub><b>Drive times</b>: search a place, and Google Maps fills in the drive from home (your own choice always wins)</sub></td>
+    <td width="50%"><img src="docs/screenshots/calendar-week.jpg" alt="Week view"><br><sub><b>Week view</b>: the whole family's week at a glance</sub></td>
   </tr>
   <tr>
     <td colspan="2"><img src="docs/screenshots/screensaver.jpg" alt="Photo screensaver with today's brief"><br><sub><b>Photo frame</b>: your photos with today's brief: when to leave, events, dinner, chores left, countdowns and a jacket/umbrella hint</sub></td>
@@ -81,13 +89,14 @@ Inspired by the Skylight Calendar, but self-hosted: your family's data lives in 
 - Two-way Google Calendar sync for **multiple Google accounts** (for example, yours and your partner's). Changes arrive incrementally every 90 seconds, and an offline queue holds edits made while the internet is down.
 - Each calendar can belong to **one or more people**. A "Twins" calendar, for example, shows on both twins' columns and filters.
 - **Birthdays 🎂 and holidays 🎉** get their own colors, with toolbar toggles to show or hide them. Google's holiday and birthday calendars are recognized automatically, and a birthday that appears in two calendars shows once.
-- **10-day weather** on each day, plus tonight's dinner on the calendar.
+- **10-day weather** on each day, plus tonight's dinner on the calendar. Set the location by typing "City, State" in Settings, and Lucarne looks up its coordinates.
 - Recurring and multi-day events, and color-coded family members with tap-to-filter.
-- **Striped colors for shared events:** an event for several people shows diagonal stripes in each person's color, and a Family event shows everyone's, so you can tell at a glance who it's for.
+- **Colors for shared events:** an event for several people is split into diagonal bands, one per person in their color, and a Family event shows everyone's, so you can tell at a glance who it's for.
 - **Calendar links (read-only):** subscribe to any `.ics` / `webcal://` link, such as a school district calendar, TeamSnap or GameChanger schedule, or a family member's iCloud or Outlook calendar. Assign it to people, and it refreshes every 30 minutes.
 - **Magic Import** (with a Gemini key): take a photo of a school flyer, sports schedule or invitation, or paste an email, and Lucarne finds the dates. You review and edit every event before anything is added.
 - **Countdowns:** "🏖️ Lake House Weekend · 15 days" chips on the calendar, the photo frame and Kid Mode.
 - **Leave-by alerts:** give an event a drive time and a driver. A banner then shows on every screen, e.g. "Leave in 12 min · Soccer at 5:30 · Dad driving".
+- **Place search & automatic drive times** (with a Google Maps key): search places as you type in the event form. Every upcoming event with a full address, including ones synced from Google Calendar, gets a drive time from home with predicted traffic. Pick "No drive", a preset, or a **custom** time (up to 24 h, for road trips) to override it. See [setup](#place-search--drive-times-google-maps).
 - **Sync Now** in Settings shows progress and the result, including exactly which calendar failed and why.
 
 **Chores, routines, habits & rewards**
@@ -107,11 +116,16 @@ Inspired by the Skylight Calendar, but self-hosted: your family's data lives in 
 **Meals**
 - Weekly meal planner and a recipe library with a 1080p **Cook Mode**: big text, step timers, and the screen stays awake.
 - Recipe import from a URL without the ads and life stories (schema.org data, with optional Gemini fallback). The dish photo is saved locally.
-- **Meal search** (with a Gemini key): describe what you want ("easy chicken tacos") and get **real recipes from real recipe sites**, with their own photos. Nothing is invented: every result is a page Lucarne opened and verified.
+- **Meal search** (with a Gemini key): describe what you want ("easy chicken tacos") and get **real recipes from real recipe sites**, with their own photos. Results come first from popular food blogs' own site search, and Gemini suggests more only when that finds too few. Nothing is invented: every result is a page Lucarne opened and verified.
 - A **recipe preview** with servings, prep and cook time, and calories, protein, carbs and fat per serving, as published by the site.
 - **Plan my week:** fills the empty dinner nights **only with recipes from your own Recipe Box**. With a Gemini key it picks for variety and follows notes like "quick on Tuesday, no fish". Without a key, or when Gemini is busy, it rotates your recipes, favorites and least-recently-cooked first. You can swap any night before saving.
 - Send a week's ingredients to the grocery list, combining duplicates.
 - Bulk import from a JSON file of meals.
+
+**Draw**
+- A drawing pad for little kids: tap who's drawing, then pick **crayons, markers or paint** (each with its own box of colors to swipe through) or the eraser. Everything uses pictures, so no reading is needed.
+- Tap ✓ to save. A picture left alone for a minute saves itself. Saved pictures can be reopened later to keep drawing, and the trash can throws away an unsaved scribble.
+- Every saved drawing joins the photo screensaver, framed with the artist's name: about one drawing for every 10–15 photos.
 
 **Photo screensaver**
 - Pick photos with Google's official Photos Picker (up to 2,000 per pick), add **whole shared albums of any size** by link (they re-sync daily), or upload your own.
@@ -134,7 +148,7 @@ One Node.js process serves the API, the web app, and a live update stream, backe
 |---|---|
 | Server | Node.js 24, [Hono](https://hono.dev), built-in `node:sqlite` (WAL), Server-Sent Events |
 | Web app | React 19, Vite, Tailwind CSS v4, TanStack Query, lucide icons |
-| Integrations | Google Calendar API, Google Photos Picker API, Open-Meteo weather, optional Gemini; optional Python helper for Google Keep |
+| Integrations | Google Calendar API, Google Photos Picker API, Open-Meteo weather and place lookup, optional Google Maps (Places API (New) + Routes API), optional Gemini; optional Python helper for Google Keep |
 
 Everything works offline except syncing with Google and calendar links, the weather, and the Gemini features (Magic Import, meal search, AI week planning).
 
@@ -208,6 +222,17 @@ Some large recipe sites (for example Allrecipes, EatingWell, Budget Bytes and Si
 ### Magic Import & Plan my week (Gemini)
 Both use the same Gemini key as meal search. **Magic Import** (Calendar → ✨ Magic Import) sends the photo or text to Gemini. It returns draft events for you to check, and nothing is saved until you tap **Add**. Photos are shrunk to 2,000 px before upload. **Plan my week** (Meals) sends only your recipe titles and tags, never invents a recipe, and falls back to a simple rotation if Gemini is unavailable.
 
+### Place search & drive times (Google Maps)
+With a Maps key, the event form's location box searches places as you type ("bright smiles" → the dentist's full address). Every upcoming event with a full address, including events synced from Google Calendar, gets a drive time from home with predicted traffic. That feeds the "Leave in 10 min" banner. A drive time you pick on an event ("No drive", "15 min drive", …) always wins; **Auto** uses Google's estimate.
+
+1. In the [Google Cloud console](https://console.cloud.google.com/) (the same project as Calendar is fine), turn on **billing**. Google requires it even inside the free monthly allowance, which a household stays well within.
+2. **APIs & Services → Library:** enable **Places API (New)** and **Routes API**.
+3. **APIs & Services → Credentials → Create credentials → API key.** Edit the key and, under **API restrictions**, allow only Places API (New) and Routes API. The key is used only by the Lucarne server, never in the browser.
+4. Recommended: **Billing → Budgets & alerts**, create a $1 budget with email alerts. Optionally, under **APIs & Services → Quotas**, cap each API's requests per day.
+5. In Lucarne, open **Settings → Maps & drive times**, paste the key, save your home address, and use **Test** to check it works.
+
+Drive times are cached per address and refreshed weekly, plus once in the hours before an event to reflect that day's traffic. Without a key, the location box is plain text and drive times are picked by hand, as before.
+
 ### Calendar links (school, sports, iCloud, Outlook)
 In **Settings → Calendar Links**, paste a subscribe link (`https://…ics` or `webcal://…`), choose whose events they are, and optionally mark it as a birthday or holiday calendar. The events are read-only on the wall; change them at the source. Lucarne checks each link every 30 minutes. If a download fails, the last good copy stays on the calendar and the error appears in Settings. Where to find links:
 - **School / district:** usually a "Subscribe" or "iCal" button on the calendar page.
@@ -279,6 +304,7 @@ Settings live in `.env` (copy `.env.example`). Google and Gemini keys can also b
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | — | Your Google Cloud OAuth client (see setup above). |
 | `GOOGLE_REDIRECT_URI` | `http://localhost:3001/api/google/callback` | Must match the redirect URI in Google Cloud. |
 | `GEMINI_API_KEY` | — | Enables meal search and AI recipe cleanup. |
+| `GOOGLE_MAPS_API_KEY` | — | Place search and automatic drive times (or paste the key in Settings). |
 | `GEMINI_MODEL` | automatic | Pin one Gemini model instead of automatic selection. |
 | `GEMINI_PAID_TIER` | off | Set to `1` to disable Lucarne's free-tier request limits (billing-enabled keys). |
 | `KEEP_PYTHON` | `python3` (`python` on Windows) | Python used to create the Keep helper's environment, if not the default. |
@@ -400,10 +426,11 @@ Project layout: `src/server` (API, sync services, database migrations), `src/cli
 
 There is no Lucarne cloud. Everything is stored on your own device. Data goes only to:
 - Google's own services, for the features you connect;
-- Open-Meteo, for weather at the location you set;
+- Open-Meteo, for weather at the location you set (and to look up that place's coordinates when you type it);
+- Google Maps, if you add a Maps key: what you type in the place search, your home address, and the addresses of upcoming events (including synced ones) to work out drive times;
 - Gemini, if you add a key: your meal-search words; for pages without structured recipe data, the page text; the photo or text you give **Magic Import**; and your recipe titles and planning notes for **Plan my week**;
 - the calendar-link (.ics) addresses you add, which Lucarne downloads every 30 minutes;
-- the recipe websites whose pages you import or that meal search checks (Lucarne downloads those pages and photos like a browser would).
+- the recipe websites whose pages you import or that meal search checks (Lucarne downloads those pages and photos like a browser would). Meal search also sends your search words to a list of food blogs' own site search.
 
 See [`docs/privacy.html`](docs/privacy.html).
 

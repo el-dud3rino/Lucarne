@@ -6,6 +6,8 @@ import { flushOutboxMutations } from '../services/google.js';
 import { expandRecurringEvent } from '../services/recurrence.js';
 import type { CalendarEvent, EventRecurrenceRule } from '../../shared/types.js';
 import { isEventCategory } from '../../shared/eventCategories.js';
+import { effectiveTravelMinutes } from '../../shared/driveTime.js';
+import { autoDriveMinutes, scheduleDriveRefresh } from '../services/driveTimes.js';
 
 export const eventsRouter = new Hono();
 
@@ -39,18 +41,24 @@ export function mapEventRow(row: Record<string, unknown>): CalendarEvent {
     recurrenceRule: (row.recurrence_rule as EventRecurrenceRule) || null,
     exceptionDates,
     category: isEventCategory(row.category) ? row.category : null,
-    travelMinutes: row.travel_minutes == null ? null : Number(row.travel_minutes),
+    ...travelFields(row),
     driverMemberId: row.driver_member_id ? String(row.driver_member_id) : null,
     icsFeedId: row.ics_feed_id ? String(row.ics_feed_id) : null,
   };
 }
 
-/** Travel time in whole minutes (0-600), or null when not set. */
+function travelFields(row: Record<string, unknown>) {
+  const manual = row.travel_minutes == null ? null : Number(row.travel_minutes);
+  const auto = row.all_day ? null : autoDriveMinutes(row.location ? String(row.location) : '');
+  return { travelMinutes: effectiveTravelMinutes(manual, auto), travelManualMinutes: manual, travelAutoMinutes: auto };
+}
+
+/** Manual travel override in whole minutes: null = automatic, 0 = no drive, 1-1440 = minutes (up to 24 h). */
 export function cleanTravelMinutes(v: unknown): number | null {
   if (v === null || v === undefined || v === '') return null;
   const n = Math.round(Number(v));
-  if (!Number.isFinite(n) || n <= 0) return null;
-  return Math.min(n, 600);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.min(n, 1440);
 }
 
 const READ_ONLY_FEED_ERROR = 'This event comes from a subscribed calendar feed and is read-only. Change it at the source.';
@@ -175,6 +183,7 @@ eventsRouter.post('/', async (c) => {
   }
 
   broadcastInvalidate(['events']);
+  scheduleDriveRefresh();
   const created = db.prepare('SELECT * FROM events WHERE id = ?').get(id) as Record<
     string,
     unknown
@@ -283,6 +292,7 @@ eventsRouter.put('/:id', async (c) => {
   }
 
   broadcastInvalidate(['events']);
+  scheduleDriveRefresh();
   const updated = db.prepare('SELECT * FROM events WHERE id = ?').get(targetId) as Record<
     string,
     unknown

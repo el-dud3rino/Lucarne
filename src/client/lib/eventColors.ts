@@ -10,7 +10,6 @@ export interface EventLook {
   striped: boolean;
 }
 
-const STRIPE_PX = 12;
 const NEUTRAL = { bg: '#F1F5F9', text: '#1E293B', accent: '#64748B' };
 
 /** Everyone except the "Family" placeholder member(s), in the household's display order. */
@@ -32,12 +31,16 @@ export function eventPeople(ev: Pick<CalendarEvent, 'memberIds'>, members: Famil
   return assigned;
 }
 
-/** Diagonal (135°) stripes, Skylight-style, one band per color. */
-export function stripes(colors: string[], px = STRIPE_PX): string {
+/**
+ * Diagonal (135°) bands, Skylight-style: each person's color appears exactly once, the bands
+ * splitting the card evenly from corner to corner (no repeating pinstripes).
+ */
+export function stripes(colors: string[]): string {
   if (colors.length === 0) return NEUTRAL.bg;
   if (colors.length === 1) return colors[0];
-  const stops = colors.map((c, i) => `${c} ${i * px}px ${(i + 1) * px}px`).join(', ');
-  return `repeating-linear-gradient(135deg, ${stops})`;
+  const step = 100 / colors.length;
+  const stops = colors.map((c, i) => `${c} ${(i * step).toFixed(2)}% ${((i + 1) * step).toFixed(2)}%`).join(', ');
+  return `linear-gradient(135deg, ${stops})`;
 }
 
 /** Vertical segments for the left accent bar, one per person. */
@@ -76,5 +79,5 @@ export function eventLook(ev: Pick<CalendarEvent, 'memberIds' | 'category'>, mem
 export function memberSwatch(member: FamilyMember, members: FamilyMember[]): string {
   if (member.role !== 'family') return member.colorAccent;
   const people = realPeople(members);
-  return people.length > 1 ? stripes(people.map((p) => p.colorAccent), 6) : member.colorAccent;
+  return people.length > 1 ? stripes(people.map((p) => p.colorAccent)) : member.colorAccent;
 }
