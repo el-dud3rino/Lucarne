@@ -4,6 +4,7 @@ import { Calendar as CalendarIcon } from 'lucide-react';
 import { apiFetch } from '../lib/api.js';
 import { formatTimeShort } from '../lib/dates.js';
 import { WeatherWidget } from '../components/WeatherWidget.js';
+import { TodayBrief } from '../components/TodayBrief.js';
 import type { AppSettings, CalendarEvent, PhotoItem } from '../../shared/types.js';
 
 interface ScreensaverProps {
@@ -369,7 +370,9 @@ export const ScreensaverOverlay: React.FC<ScreensaverProps> = ({
             </div>
           </div>
 
-          {nextEvent && (
+          {settings.showBriefOnScreensaver ? (
+            <TodayBrief settings={settings} active={active} />
+          ) : nextEvent && (
             <div className="bg-black/45 backdrop-blur-md border border-white/15 rounded-2xl px-5 py-3.5 max-w-sm">
               <div className="text-[11px] font-bold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
                 <CalendarIcon className="w-3.5 h-3.5" />

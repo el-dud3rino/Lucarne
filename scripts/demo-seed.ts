@@ -23,6 +23,7 @@ const { db, runTransaction } = await import('../src/server/db/connection.js');
 const { initSchema } = await import('../src/server/db/schema.js');
 const { seedIfNeeded } = await import('../src/server/db/seed.js');
 const { classifyGroceryItem } = await import('../src/shared/groceryClassifier.js');
+const { normalizeIngredientName } = await import('../src/shared/ingredientAggregator.js');
 
 initSchema();
 const already = (db.prepare("SELECT value FROM app_settings WHERE key = 'demoSeeded'").get() as { value: string } | undefined);
@@ -203,6 +204,81 @@ runTransaction(() => {
     if (i % 2 === 0) plan.run(crypto.randomUUID(), d, 'breakfast', null, i === 0 ? 'Pancakes & berries' : 'Oatmeal bar', '');
     if (i < 5) plan.run(crypto.randomUUID(), d, 'lunch', null, i % 2 ? 'Turkey wraps' : 'Leftovers', '');
   }
+
+  // ---------- getting there: drive times and drivers ----------
+  // A swim lesson starting ~40 min from now with a 20 min drive, so the "Leave in …" banner shows.
+  const soon = new Date(Date.now() + 40 * 60_000);
+  soon.setMinutes(Math.ceil(soon.getMinutes() / 5) * 5, 0, 0);
+  db.prepare(
+    `INSERT INTO events (id, title, description, location, start_iso, end_iso, all_day, member_ids_json, updated_at, travel_minutes, driver_member_id)
+     VALUES (?, 'Leo: Swim Lesson', 'Goggles + towel', 'Rec Center Pool', ?, ?, 0, ?, ?, 20, ?)`
+  ).run(crypto.randomUUID(), soon.toISOString(), new Date(soon.getTime() + 45 * 60_000).toISOString(), JSON.stringify([LEO]), nowIso, MOM);
+  db.prepare("UPDATE events SET travel_minutes = 15, driver_member_id = ? WHERE title = 'Leo: Soccer Game'").run(DAD);
+  db.prepare("UPDATE events SET travel_minutes = 10, driver_member_id = ? WHERE title = 'Maya: Piano Lesson'").run(MOM);
+
+  // ---------- countdowns ----------
+  const cd = db.prepare('INSERT INTO countdowns (id, title, emoji, date_str, member_id, created_at) VALUES (?, ?, ?, ?, ?, ?)');
+  cd.run(crypto.randomUUID(), "Maya's Birthday", '🎂', dateStr(day(6)), MAYA, nowIso);
+  cd.run(crypto.randomUUID(), 'Lake House Weekend', '🏞️', dateStr(day(15)), null, nowIso);
+  cd.run(crypto.randomUUID(), 'Disney Trip', '🏰', dateStr(day(48)), null, nowIso);
+
+  // ---------- rewards ----------
+  const rw = db.prepare('INSERT INTO rewards (id, title, emoji, cost, member_id, active, sort_order) VALUES (?, ?, ?, ?, ?, 1, ?)');
+  const rewards: Array<[string, string, number]> = [
+    ['Pick the family movie', '🎬', 15],
+    ['Stay up 30 min late', '🌙', 20],
+    ['Ice cream trip', '🍦', 30],
+    ['New book or small toy', '🧸', 50],
+  ];
+  const rewardIds = rewards.map(([title, emoji, cost], i) => {
+    const id = crypto.randomUUID();
+    rw.run(id, title, emoji, cost, null, i);
+    return id;
+  });
+  db.prepare(
+    'INSERT INTO reward_redemptions (id, reward_id, member_id, title, emoji, cost, redeemed_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(crypto.randomUUID(), rewardIds[0], MAYA, rewards[0][0], rewards[0][1], rewards[0][2], new Date(Date.now() - 86_400_000).toISOString());
+
+  // ---------- routines (some steps already done this morning) ----------
+  const addRoutine = (memberId: string, title: string, emoji: string, time: string, stars: number, steps: Array<[string, string]>, doneCount: number) => {
+    const rid = crypto.randomUUID();
+    db.prepare(
+      'INSERT INTO routines (id, title, emoji, member_id, time_of_day, days_of_week_json, stars, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, 0)'
+    ).run(rid, title, emoji, memberId, time, '[]', stars);
+    steps.forEach(([e, t], i) => {
+      const sid = crypto.randomUUID();
+      db.prepare('INSERT INTO routine_steps (id, routine_id, title, emoji, sort_order) VALUES (?, ?, ?, ?, ?)').run(sid, rid, t, e, i);
+      if (i < doneCount) db.prepare('INSERT INTO routine_step_checks (step_id, date_str, checked_at) VALUES (?, ?, ?)').run(sid, today, nowIso);
+    });
+  };
+  const morning: Array<[string, string]> = [['🛏️', 'Make bed'], ['👕', 'Get dressed'], ['🥣', 'Eat breakfast'], ['🪥', 'Brush teeth'], ['🎒', 'Pack backpack'], ['👟', 'Shoes on']];
+  const bedtime: Array<[string, string]> = [['🧸', 'Tidy toys'], ['🛁', 'Bath'], ['👕', 'Pajamas on'], ['🪥', 'Brush teeth'], ['📚', 'Story time']];
+  addRoutine(LEO, 'School morning', '🌅', 'morning', 2, morning, 4);
+  addRoutine(MAYA, 'School morning', '🌅', 'morning', 2, morning, 6);
+  addRoutine(LEO, 'Bedtime', '🌙', 'evening', 1, bedtime, 0);
+  addRoutine(MAYA, 'Bedtime', '🌙', 'evening', 1, bedtime, 0);
+  addRoutine(MAYA, 'After school', '🎒', 'afternoon', 0, [['🎒', 'Unpack backpack'], ['🍎', 'Snack'], ['📝', 'Homework'], ['🎹', 'Piano practice']], 0);
+
+  // ---------- habits with a little history ----------
+  const addHabit = (memberId: string, title: string, emoji: string, target: number, unit: string, history: number[]) => {
+    const hid = crypto.randomUUID();
+    db.prepare('INSERT INTO habits (id, title, emoji, member_id, target_per_day, unit, sort_order) VALUES (?, ?, ?, ?, ?, ?, 0)').run(hid, title, emoji, memberId, target, unit);
+    history.forEach((n, i) => {
+      if (n > 0) db.prepare('INSERT INTO habit_logs (habit_id, date_str, count) VALUES (?, ?, ?)').run(hid, dateStr(day(i - history.length + 1)), n);
+    });
+  };
+  addHabit(MAYA, 'Piano practice', '🎹', 1, '', [1, 1, 0, 1, 1, 1, 1]);
+  addHabit(LEO, 'Reading', '📚', 20, 'min', [20, 25, 20, 10, 20, 30, 10]);
+  addHabit(MOM, 'Drink water', '💧', 6, 'glasses', [6, 7, 5, 6, 6, 8, 3]);
+  addHabit(DAD, 'Move', '🏃', 30, 'min', [30, 0, 45, 30, 30, 0, 0]);
+
+  // ---------- grocery history (powers the "Usual" quick-add tiles) ----------
+  const hist = db.prepare('INSERT OR REPLACE INTO grocery_history (name_key, text, category, add_count, last_added_at, hidden) VALUES (?, ?, ?, ?, ?, 0)');
+  const usual: Array<[string, number]> = [
+    ['Milk', 14], ['Bananas', 12], ['Eggs', 11], ['Bread', 9], ['Strawberries', 8], ['Greek yogurt', 7], ['Shredded cheese', 7],
+    ['Chicken breasts', 6], ['Apples', 6], ['Tortillas', 5], ['Butter', 5], ['Goldfish crackers', 4], ['Paper towels', 4],
+  ];
+  usual.forEach(([text, n], i) => hist.run(normalizeIngredientName(text), text, classifyGroceryItem(text), n, new Date(Date.now() - i * 86_400_000).toISOString()));
 });
 
 console.log(`Demo household ready in ${DEMO_DIR}`);

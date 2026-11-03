@@ -67,6 +67,145 @@ export interface CalendarEvent {
   originalEventId?: string;
   /** Dates (YYYY-MM-DD) excluded from recurrence projection */
   exceptionDates?: string[];
+  /** Minutes needed to get there; drives the "leave in 15 min" banner (Lucarne-only, not sent to Google) */
+  travelMinutes?: number | null;
+  /** Who is driving / taking them (Lucarne-only) */
+  driverMemberId?: string | null;
+  /** Set for read-only events from a subscribed calendar feed (ICS) */
+  icsFeedId?: string | null;
+}
+
+export interface Countdown {
+  id: string;
+  title: string;
+  emoji: string;
+  dateStr: string; // YYYY-MM-DD
+  memberId: string | null;
+  /** Whole days from today (0 = today); computed by the server */
+  daysLeft: number;
+}
+
+export interface Reward {
+  id: string;
+  title: string;
+  emoji: string;
+  cost: number;
+  /** null = any family member can redeem */
+  memberId: string | null;
+  sortOrder: number;
+}
+
+export interface RewardRedemption {
+  id: string;
+  rewardId: string | null;
+  memberId: string;
+  title: string;
+  emoji: string;
+  cost: number;
+  redeemedAt: string;
+}
+
+export interface MemberStarBalance {
+  memberId: string;
+  earned: number;
+  spent: number;
+  balance: number;
+}
+
+export interface RoutineStep {
+  id: string;
+  title: string;
+  emoji: string;
+  sortOrder: number;
+  /** Checked off on the requested date */
+  done: boolean;
+}
+
+export interface Routine {
+  id: string;
+  title: string;
+  emoji: string;
+  memberId: string;
+  timeOfDay: ChoreTimeOfDay;
+  /** 0 (Sun) - 6 (Sat); empty = every day */
+  daysOfWeek: number[];
+  /** Bonus stars for finishing every step (0 = none) */
+  stars: number;
+  sortOrder: number;
+  steps: RoutineStep[];
+}
+
+export interface Habit {
+  id: string;
+  title: string;
+  emoji: string;
+  memberId: string;
+  targetPerDay: number;
+  unit: string;
+  sortOrder: number;
+  /** Count logged on the requested date */
+  today: number;
+  /** Last 7 days ending on the requested date, oldest first: count per day */
+  week: number[];
+  /** Consecutive days (ending on the requested date or the day before) where the target was met */
+  streak: number;
+}
+
+export interface IcsFeed {
+  id: string;
+  url: string;
+  name: string;
+  memberIds: string[];
+  category: import('./eventCategories.js').EventCategory | null;
+  enabled: boolean;
+  eventCount: number;
+  lastSyncedAt: string | null;
+  syncError: string | null;
+}
+
+export interface TodayChore {
+  id: string;
+  title: string;
+  emoji: string;
+  assignedMemberId: string | null;
+  timeOfDay: ChoreTimeOfDay;
+  stars: number;
+  done: boolean;
+}
+
+/** GET /api/today — morning brief, leave-by alerts and kid mode in one request */
+export interface TodaySummary {
+  dateStr: string;
+  events: CalendarEvent[];
+  dinner: { title: string; imageUrl: string | null } | null;
+  /** Only filled when a memberId is requested (kid mode) */
+  chores: TodayChore[];
+  choresLeft: Array<{ memberId: string; left: number; total: number }>;
+  sharedChoresLeft: number;
+  routines: Routine[];
+  /** Only filled when a memberId is requested (kid mode) */
+  habits: Habit[];
+  countdowns: Countdown[];
+}
+
+/** POST /api/today/magic-import draft (reviewed before anything is saved) */
+export interface MagicEventDraft {
+  title: string;
+  date: string;
+  endDate: string;
+  startTime: string;
+  endTime: string;
+  allDay: boolean;
+  location: string;
+  notes: string;
+  memberIds: string[];
+}
+
+export interface GroceryQuickItem {
+  nameKey: string;
+  text: string;
+  category: GroceryCategory;
+  addCount: number;
 }
 
 export interface AggregatedIngredient {
@@ -261,6 +400,8 @@ export interface AppSettings {
   showDinnerOnCalendar: boolean;
   showBirthdays: boolean;
   showHolidays: boolean;
+  /** Photo frame shows today's events, dinner, chores left and countdowns */
+  showBriefOnScreensaver: boolean;
   /** Aisles in the order you walk your store (grocery lists are grouped in this order) */
   groceryAisleOrder: GroceryCategory[];
   defaultGroceryListId: string;

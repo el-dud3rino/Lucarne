@@ -14,7 +14,9 @@ import {
   Trash2,
   Users,
   X,
+  CalendarCheck,
 } from 'lucide-react';
+import { PlanWeekSheet } from '../components/PlanWeek.js';
 import { apiFetch } from '../lib/api.js';
 import { addDays, startOfWeek, toDateStr } from '../lib/dates.js';
 import { aggregateIngredients } from '../../shared/ingredientAggregator.js';
@@ -61,6 +63,7 @@ export const MealsView: React.FC<MealsViewProps> = ({ settings }) => {
   const [cookRecipe, setCookRecipe] = useState<Recipe | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [showGroceryModal, setShowGroceryModal] = useState(false);
+  const [showPlanWeek, setShowPlanWeek] = useState(false);
 
   const weekEndStr = toDateStr(addDays(weekStart, 6));
   const weekStartStr = toDateStr(weekStart);
@@ -225,7 +228,17 @@ export const MealsView: React.FC<MealsViewProps> = ({ settings }) => {
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 max-w-full overflow-x-auto">
+          {tab === 'planner' && (
+            <button
+              type="button"
+              onClick={() => setShowPlanWeek(true)}
+              className="h-11 px-4 rounded-2xl bg-white border border-emerald-300 text-emerald-800 hover:bg-emerald-50 active:scale-95 font-bold text-sm flex items-center gap-2 shadow-2xs shrink-0"
+            >
+              <CalendarCheck className="w-4 h-4" />
+              <span>Plan my week</span>
+            </button>
+          )}
           {weekIngredients.length > 0 && (
             <button
               type="button"
@@ -247,6 +260,15 @@ export const MealsView: React.FC<MealsViewProps> = ({ settings }) => {
           </button>
         </div>
       </div>
+
+      {showPlanWeek && (
+        <PlanWeekSheet
+          startDate={toDateStr(weekStart) < toDateStr(new Date()) ? toDateStr(new Date()) : toDateStr(weekStart)}
+          recipes={recipes}
+          geminiConfigured={settings.geminiApiKeyConfigured}
+          onClose={() => setShowPlanWeek(false)}
+        />
+      )}
 
       {/* TAB 1: Weekly Meal Planner Grid */}
       {tab === 'planner' && (

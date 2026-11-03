@@ -88,6 +88,35 @@ try {
   await settle(wall);
   await shot(wall, 'chores');
 
+  await wall.getByRole('tab', { name: 'Routines' }).click();
+  await settle(wall);
+  await shot(wall, 'routines');
+
+  await wall.getByRole('tab', { name: 'Habits' }).click();
+  await settle(wall);
+  await shot(wall, 'habits');
+  await wall.getByRole('tab', { name: 'Chores' }).click();
+
+  await wall.locator('button', { hasText: 'Star Tracker' }).first().click();
+  await wall.waitForSelector('[data-testid="rewards-sheet"]');
+  await settle(wall, 600);
+  await shot(wall, 'rewards');
+  await wall.keyboard.press('Escape');
+
+  await wall.locator('button', { hasText: 'Kid Mode' }).first().click();
+  await wall.locator('[role="dialog"] button', { hasText: 'Leo' }).first().click();
+  await wall.waitForSelector('[data-testid="kid-mode"]');
+  await settle(wall, 800);
+  await shot(wall, 'kid-mode');
+  await wall.getByRole('button', { name: 'Exit kid mode' }).click();
+
+  await nav(wall, 'Calendar');
+  await wall.getByRole('button', { name: 'Magic Import' }).click();
+  await wall.waitForSelector('[data-testid="magic-import"]');
+  await settle(wall, 400);
+  await shot(wall, 'magic-import');
+  await wall.keyboard.press('Escape');
+
   await nav(wall, 'Lists');
   await settle(wall);
   await shot(wall, 'groceries');

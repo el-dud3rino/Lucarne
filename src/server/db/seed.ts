@@ -33,6 +33,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   showDinnerOnCalendar: true,
   showBirthdays: true,
   showHolidays: true,
+  showBriefOnScreensaver: true,
   groceryAisleOrder: [...GROCERY_CATEGORIES],
   defaultGroceryListId: 'list-groceries',
   googleClientId: '',

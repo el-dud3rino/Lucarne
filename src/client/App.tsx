@@ -11,6 +11,7 @@ import {
 import { apiFetch, useRealtimeSync } from './lib/api.js';
 import { WeatherWidget } from './components/WeatherWidget.js';
 import { OnScreenKeyboard } from './components/OnScreenKeyboard.js';
+import { LeaveBanner, SyncStatusChip } from './components/TodayBar.js';
 import { CalendarView } from './views/CalendarView.js';
 import { ChoresView } from './views/ChoresView.js';
 import { ListsView } from './views/ListsView.js';
@@ -36,6 +37,7 @@ const FALLBACK_SETTINGS: AppSettings = {
   showDinnerOnCalendar: true,
   showBirthdays: true,
   showHolidays: true,
+  showBriefOnScreensaver: true,
   groceryAisleOrder: [...GROCERY_CATEGORIES],
   defaultGroceryListId: 'list-groceries',
   googleClientId: '',
@@ -205,6 +207,7 @@ export const App: React.FC = () => {
                 connected ? 'bg-emerald-500' : 'bg-amber-400'
               }`}
             />
+            <SyncStatusChip connected={connected} />
           </div>
 
           {/* Tap-to-Filter Family Member Avatars (wall/tablet: in the header) */}
@@ -234,6 +237,9 @@ export const App: React.FC = () => {
             {renderMemberFilter('pb-2 [&_.member-name]:inline')}
           </div>
         )}
+
+        {/* "Leave in 10 min" alerts for events with a drive time (every tab) */}
+        <LeaveBanner members={members} />
 
         {/* Active View Canvas */}
         <main className="flex-1 min-h-0 p-3.5 md:p-5 overflow-hidden">

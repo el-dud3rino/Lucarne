@@ -339,7 +339,7 @@ export function raceGeminiModels<T>(
  * that last worked is tried first. Uses streaming so a healthy model is recognised within seconds.
  * Errors come back human-readable.
  */
-async function generateWithCurrentModel(
+export async function generateWithCurrentModel(
   ai: GoogleGenAI,
   params: Omit<GenerateContentParameters, 'model'>,
   task: GeminiTask = 'heavy'

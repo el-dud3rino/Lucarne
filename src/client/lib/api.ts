@@ -22,6 +22,14 @@ export async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** Queries computed from other data that must refresh along with it. */
+const DERIVED_TOPICS: Record<string, string[]> = {
+  chores: ['rewards'],
+  routines: ['rewards'],
+  events: ['health'],
+  settings: ['health', 'feeds', 'backups'],
+};
+
 /**
  * Connects to /api/stream SSE bus and automatically reconciles TanStack Query caches
  * across the wall kiosk and all family phones on the LAN.
@@ -34,6 +42,7 @@ export function useRealtimeSync(): { connected: boolean } {
     let es: EventSource | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let unmounted = false;
+    let hadDisconnect = false;
 
     const connect = () => {
       if (unmounted) return;
@@ -41,14 +50,20 @@ export function useRealtimeSync(): { connected: boolean } {
 
       es.onopen = () => {
         setConnected(true);
+        // Catch up on anything that changed while we were disconnected.
+        if (hadDisconnect) queryClient.invalidateQueries();
+        hadDisconnect = false;
       };
 
       es.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data) as { type: string; topics?: string[] };
           if (msg.type === 'invalidate' && Array.isArray(msg.topics)) {
-            for (const topic of msg.topics) {
-              queryClient.invalidateQueries({ queryKey: [topic] });
+            const keys = new Set<string>(msg.topics);
+            for (const topic of msg.topics) for (const extra of DERIVED_TOPICS[topic] ?? []) keys.add(extra);
+            keys.add('today'); // the Today summary (brief, leave-by, kid mode) mixes everything
+            for (const key of keys) {
+              queryClient.invalidateQueries({ queryKey: [key] });
             }
           }
         } catch {
@@ -57,6 +72,7 @@ export function useRealtimeSync(): { connected: boolean } {
       };
 
       es.onerror = () => {
+        hadDisconnect = true;
         setConnected(false);
         es?.close();
         if (!unmounted) {

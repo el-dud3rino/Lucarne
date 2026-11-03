@@ -12,6 +12,7 @@ import {
 import { classifyGroceryItem } from '../../shared/groceryClassifier.js';
 import { normalizeNutrition } from '../../shared/nutrition.js';
 import { rememberedAisle } from '../services/aisles.js';
+import { planDinners } from '../services/mealPlanner.js';
 
 function saveNutrition(recipeId: string, raw: unknown): void {
   const n = normalizeNutrition(raw);
@@ -406,4 +407,36 @@ mealsRouter.post('/send-to-groceries', async (c) => {
     merged: mergedCount,
     total: addedCount + mergedCount,
   });
+});
+
+/** Suggest dinners for the empty nights in a date range, from saved recipes only (nothing is saved yet). */
+mealsRouter.post('/plan-week', async (c) => {
+  const body = await c.req.json<{ startDate?: string; days?: number; notes?: string }>();
+  const startDate = /^\d{4}-\d{2}-\d{2}$/.test(body.startDate || '') ? body.startDate! : new Date().toLocaleDateString('en-CA');
+  try {
+    return c.json(await planDinners(startDate, Number(body.days) || 7, String(body.notes || '')));
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : 'Could not plan the week' }, 400);
+  }
+});
+
+/** Save accepted suggestions as dinners (only into nights that are still empty). */
+mealsRouter.post('/plan-week/apply', async (c) => {
+  const { dinners } = await c.req.json<{ dinners: Array<{ dateStr: string; recipeId: string }> }>();
+  if (!Array.isArray(dinners)) return c.json({ error: 'Nothing to save' }, 400);
+  let saved = 0;
+  runTransaction(() => {
+    for (const d of dinners.slice(0, 31)) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(d?.dateStr)) || !db.prepare('SELECT 1 FROM recipes WHERE id = ?').get(String(d.recipeId))) continue;
+      const r = db
+        .prepare(
+          `INSERT INTO meal_plans (id, date_str, slot, recipe_id, custom_title, notes) VALUES (?, ?, 'dinner', ?, '', '')
+           ON CONFLICT(date_str, slot) DO NOTHING`
+        )
+        .run(crypto.randomUUID(), d.dateStr, d.recipeId);
+      saved += Number(r.changes);
+    }
+  });
+  broadcastInvalidate(['meals']);
+  return c.json({ saved });
 });

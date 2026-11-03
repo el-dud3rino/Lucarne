@@ -80,16 +80,11 @@ test('End-to-End User Flows: Calendar, Chores & Stars, Groceries, Meals & Cook M
     // Open Star Tracker drawer to inspect initial stars
     const starTrackerBtn = page.locator('button:has-text("Star Tracker")');
     await starTrackerBtn.click();
-    await page.waitForSelector('text=Star Ledger & Rewards');
+    await page.waitForSelector('[data-testid="rewards-sheet"]');
+    await page.waitForSelector('text=Household Star Tracker');
 
-    // Close Star Tracker drawer
-    const closeStarDrawer = page.locator('button:has-text("Star Ledger & Rewards") ~ button, div:has-text("Star Ledger & Rewards") button:has(svg.lucide-x)').first();
-    if (await closeStarDrawer.isVisible()) {
-      await closeStarDrawer.click();
-    } else {
-      // Tap backdrop
-      await page.mouse.click(100, 100);
-    }
+    // Close Star Tracker sheet
+    await page.locator('[data-testid="rewards-sheet"] button[aria-label="Close"]').click();
     await page.waitForTimeout(300);
 
     // Toggle a chore (click the first chore card)

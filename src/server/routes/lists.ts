@@ -10,9 +10,53 @@ import {
   normalizeIngredientName,
   mergeQuantities,
 } from '../../shared/ingredientAggregator.js';
-import type { GroceryCategory, ListItem, TaskList } from '../../shared/types.js';
+import type { GroceryCategory, GroceryQuickItem, ListItem, TaskList } from '../../shared/types.js';
 
 export const listsRouter = new Hono();
+
+/** Remembers what this household adds to grocery lists, for the one-tap "usual items" tiles. */
+export function recordGroceryHistory(listId: string, text: string, category: string, nowIso = new Date().toISOString()): void {
+  const list = db.prepare('SELECT is_grocery FROM lists WHERE id = ?').get(listId) as { is_grocery: number } | undefined;
+  if (!list?.is_grocery) return;
+  const key = normalizeIngredientName(text);
+  if (!key) return;
+  db.prepare(
+    `INSERT INTO grocery_history (name_key, text, category, add_count, last_added_at, hidden) VALUES (?, ?, ?, 1, ?, 0)
+     ON CONFLICT(name_key) DO UPDATE SET text = excluded.text, category = excluded.category,
+       add_count = add_count + 1, last_added_at = excluded.last_added_at, hidden = 0`
+  ).run(key, text.trim().slice(0, 80), category, nowIso);
+}
+
+/** Most-added items that aren't already waiting on the list (most frequent, then most recent). */
+export function quickItemsForList(listId: string, limit = 12): GroceryQuickItem[] {
+  const onList = new Set(
+    (db.prepare('SELECT text FROM list_items WHERE list_id = ? AND checked = 0').all(listId) as Array<{ text: string }>).map((r) =>
+      normalizeIngredientName(r.text)
+    )
+  );
+  const rows = db
+    .prepare('SELECT * FROM grocery_history WHERE hidden = 0 ORDER BY add_count DESC, last_added_at DESC LIMIT 60')
+    .all() as Record<string, unknown>[];
+  return rows
+    .filter((r) => !onList.has(String(r.name_key)))
+    .slice(0, limit)
+    .map((r) => ({
+      nameKey: String(r.name_key),
+      text: String(r.text),
+      category: String(r.category) as GroceryCategory,
+      addCount: Number(r.add_count),
+    }));
+}
+
+listsRouter.get('/:id/quick-items', (c) => c.json(quickItemsForList(c.req.param('id'))));
+
+/** Stop suggesting an item (it comes back if it's added by hand again later). */
+listsRouter.post('/quick-items/hide', async (c) => {
+  const { nameKey } = await c.req.json<{ nameKey: string }>();
+  db.prepare('UPDATE grocery_history SET hidden = 1, add_count = 0 WHERE name_key = ?').run(String(nameKey || ''));
+  broadcastInvalidate(['lists']);
+  return c.json({ ok: true });
+});
 
 function mapListRow(row: Record<string, unknown>): TaskList {
   return {
@@ -176,6 +220,7 @@ listsRouter.post('/:id/items', async (c) => {
        SET quantity = ?, updated_at = ?
        WHERE id = ?`
     ).run(mergedQty, nowIso, String(existing.id));
+    recordGroceryHistory(listId, text, String(existing.category));
 
     broadcastInvalidate(['lists']);
     scheduleKeepSync();
@@ -200,6 +245,7 @@ listsRouter.post('/:id/items', async (c) => {
     body.recipeSourceTitle || null,
     nowIso
   );
+  if (!body.recipeSourceTitle) recordGroceryHistory(listId, text, category, nowIso);
 
   broadcastInvalidate(['lists']);
     scheduleKeepSync();

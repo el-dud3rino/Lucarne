@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Award,
+  Baby,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -13,6 +14,10 @@ import {
   X,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api.js';
+import { RewardsSheet } from '../components/Rewards.js';
+import { RoutinesBoard } from '../components/Routines.js';
+import { KidModeOverlay } from '../components/KidMode.js';
+import { Sheet } from '../components/Sheet.js';
 import { addDays, toDateStr } from '../lib/dates.js';
 import { choreAppliesToDate } from '../../shared/chores.js';
 
@@ -57,6 +62,9 @@ export const ChoresView: React.FC<ChoresViewProps> = ({ members, selectedMemberI
   const [showStarsDrawer, setShowStarsDrawer] = useState(false);
   const [editingChore, setEditingChore] = useState<Partial<Chore> | null>(null);
   const [claimingChore, setClaimingChore] = useState<Chore | null>(null);
+  const [board, setBoard] = useState<'chores' | 'routines' | 'habits'>('chores');
+  const [kidPicker, setKidPicker] = useState(false);
+  const [kidMember, setKidMember] = useState<FamilyMember | null>(null);
 
   const individualMembers = useMemo(
     () => members.filter((m) => m.role !== 'family'),
@@ -288,16 +296,50 @@ export const ChoresView: React.FC<ChoresViewProps> = ({ members, selectedMemberI
           </h2>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 max-w-full overflow-x-auto">
+          <div className="bg-stone-200/75 p-1 rounded-2xl flex items-center gap-1 shrink-0" role="tablist" aria-label="Chores, routines or habits">
+            {(
+              [
+                ['chores', 'Chores'],
+                ['routines', 'Routines'],
+                ['habits', 'Habits'],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={board === key}
+                onClick={() => setBoard(key)}
+                className={`h-10 min-h-[40px] px-3.5 rounded-xl text-sm font-bold whitespace-nowrap transition ${
+                  board === key ? 'bg-white text-slate-900 shadow-xs' : 'text-stone-600 hover:text-slate-900'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setKidPicker(true)}
+            className="h-11 px-4 rounded-2xl bg-white border border-stone-200 text-slate-700 font-bold text-sm flex items-center gap-2 active:scale-95 shrink-0"
+            title="Big, simple screen for one child"
+          >
+            <Baby className="w-5 h-5 text-pink-500" />
+            <span className="hidden lg:inline">Kid Mode</span>
+          </button>
+
           <button
             type="button"
             onClick={() => setShowStarsDrawer(true)}
-            className="h-11 px-4 rounded-2xl bg-amber-100/90 hover:bg-amber-200/80 border border-amber-300/80 text-amber-950 font-bold text-sm flex items-center gap-2 active:scale-95"
+            className="h-11 px-4 rounded-2xl bg-amber-100/90 hover:bg-amber-200/80 border border-amber-300/80 text-amber-950 font-bold text-sm flex items-center gap-2 active:scale-95 shrink-0"
           >
             <Award className="w-5 h-5 text-amber-600" />
             <span>Star Tracker</span>
           </button>
 
+          {board === 'chores' && (
           <button
             type="button"
             onClick={() =>
@@ -311,15 +353,21 @@ export const ChoresView: React.FC<ChoresViewProps> = ({ members, selectedMemberI
                 stars: 1,
               })
             }
-            className="h-11 px-4 rounded-2xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-sm flex items-center gap-2 shadow-sm active:scale-95"
+            className="h-11 px-4 rounded-2xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-sm flex items-center gap-2 shadow-sm active:scale-95 shrink-0"
           >
             <Plus className="w-5 h-5" />
             <span>New Chore</span>
           </button>
+          )}
         </div>
       </div>
 
+      {board !== 'chores' && (
+        <RoutinesBoard mode={board} members={visibleMembers} allMembers={members} dateStr={dateStr} />
+      )}
+
       {/* Person Columns + Shared Household Column */}
+      {board === 'chores' && (
       <div
         className="flex-1 min-h-0 grid gap-3.5 overflow-x-auto pb-1"
         style={{
@@ -411,6 +459,8 @@ export const ChoresView: React.FC<ChoresViewProps> = ({ members, selectedMemberI
         </div>
       </div>
 
+      )}
+
       {/* "Who Did It?" Quick Picker for Shared Chores */}
       {claimingChore && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
@@ -451,113 +501,31 @@ export const ChoresView: React.FC<ChoresViewProps> = ({ members, selectedMemberI
         </div>
       )}
 
-      {/* Internal Star & Household Contribution Ledger Modal (Kids + Parents) */}
-      {showStarsDrawer && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl shadow-2xl border border-stone-200 max-w-2xl w-full p-6 space-y-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-2xl font-extrabold text-slate-800 flex items-center gap-2">
-                  <Award className="w-6 h-6 text-amber-500" />
-                  Household Star Tracker · Star Ledger & Rewards
-                </h3>
-                <p className="text-sm text-stone-500">
-                  Internal tally across kids & parents to pair with your physical star chart.
-                </p>
-              </div>
+      {/* Star Tracker: balances, rewards and redeeming */}
+      {showStarsDrawer && <RewardsSheet members={members} stats={stats} onClose={() => setShowStarsDrawer(false)} />}
+
+      {kidPicker && (
+        <Sheet title="Kid mode" subtitle="A big, simple screen with just one person's day. Tap ✕ to come back." onClose={() => setKidPicker(false)}>
+          <div className="grid grid-cols-2 gap-3">
+            {individualMembers.map((m) => (
               <button
+                key={m.id}
                 type="button"
-                onClick={() => setShowStarsDrawer(false)}
-                className="w-10 h-10 min-w-[40px] min-h-[40px] rounded-full bg-stone-100 hover:bg-stone-200 flex items-center justify-center"
+                onClick={() => {
+                  setKidPicker(false);
+                  setKidMember(m);
+                }}
+                style={{ backgroundColor: m.colorBg, color: m.colorText }}
+                className="p-5 rounded-2xl font-extrabold text-xl flex items-center gap-3 active:scale-95 transition shadow-2xs"
               >
-                <X className="w-5 h-5" />
+                <span className="text-4xl">{m.emoji}</span>
+                <span>{m.name}</span>
               </button>
-            </div>
-
-            {/* Visual Reward Goal Milestones */}
-            <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/80 rounded-2xl p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-extrabold uppercase tracking-wider text-amber-800 flex items-center gap-1.5">
-                  <Trophy className="w-4 h-4 text-amber-600" />
-                  Family Reward Milestones
-                </span>
-                <span className="text-xs font-bold text-amber-700">
-                  Total Stars: {stats.reduce((acc, s) => acc + (s.allTimeStars || 0), 0)} ⭐
-                </span>
-              </div>
-              <div className="grid grid-cols-4 gap-2">
-                {[
-                  { stars: 10, label: 'Bronze', reward: 'Extra Screen Time', emoji: '🥉' },
-                  { stars: 25, label: 'Silver', reward: 'Ice Cream Treat', emoji: '🥈' },
-                  { stars: 50, label: 'Gold', reward: 'Choose Family Movie', emoji: '🥇' },
-                  { stars: 100, label: 'Champion', reward: 'Family Pizza Night', emoji: '🍕' },
-                ].map((milestone) => {
-                  const familyTotal = stats.reduce((acc, s) => acc + (s.allTimeStars || 0), 0);
-                  const reached = familyTotal >= milestone.stars;
-                  return (
-                    <div
-                      key={milestone.stars}
-                      className={`rounded-xl p-2.5 text-center border transition ${
-                        reached
-                          ? 'bg-white border-amber-400 shadow-2xs ring-1 ring-amber-300'
-                          : 'bg-white/60 border-stone-200 opacity-60'
-                      }`}
-                    >
-                      <div className="text-lg">{milestone.emoji}</div>
-                      <div className="font-extrabold text-xs text-slate-800">{milestone.stars} ⭐</div>
-                      <div className="text-[10px] font-bold text-amber-800 truncate" title={milestone.reward}>
-                        {milestone.reward}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-              {individualMembers.map((m) => {
-                const st = stats.find((s) => s.memberId === m.id);
-                return (
-                  <div
-                    key={m.id}
-                    style={{ backgroundColor: m.colorBg, color: m.colorText }}
-                    className="rounded-2xl p-4 border border-black/5 space-y-3"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2.5">
-                        <span className="text-2xl">{m.emoji}</span>
-                        <div>
-                          <div className="font-extrabold text-lg">{m.name}</div>
-                          <div className="text-xs uppercase font-bold opacity-70">{m.role}</div>
-                        </div>
-                      </div>
-                      <div className="px-3 py-1 rounded-full bg-white/80 font-extrabold text-sm text-amber-700 flex items-center gap-1">
-                        <Star className="w-4 h-4 fill-amber-400 text-amber-500" />
-                        {st?.allTimeStars ?? 0} total
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-2 text-center bg-white/75 rounded-xl p-2.5 text-slate-800">
-                      <div>
-                        <div className="text-lg font-extrabold">{st?.todayStars ?? 0} ⭐</div>
-                        <div className="text-[11px] font-bold text-stone-500">Today</div>
-                      </div>
-                      <div>
-                        <div className="text-lg font-extrabold">{st?.weekStars ?? 0} ⭐</div>
-                        <div className="text-[11px] font-bold text-stone-500">This Week</div>
-                      </div>
-                      <div>
-                        <div className="text-lg font-extrabold">{st?.monthStars ?? 0} ⭐</div>
-                        <div className="text-[11px] font-bold text-stone-500">This Month</div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            ))}
           </div>
-        </div>
+        </Sheet>
       )}
+      {kidMember && <KidModeOverlay member={kidMember} onExit={() => setKidMember(null)} />}
 
       {/* Chore Create / Edit Modal */}
       {editingChore && (

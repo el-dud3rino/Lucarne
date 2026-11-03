@@ -8,7 +8,7 @@ import { stream } from 'hono/streaming';
 import { serve } from '@hono/node-server';
 import { initSchema } from './db/schema.js';
 import { seedIfNeeded } from './db/seed.js';
-import { MEDIA_PHOTOS_DIR, MEDIA_RECIPES_DIR, performBackup } from './db/connection.js';
+import { MEDIA_PHOTOS_DIR, MEDIA_RECIPES_DIR, backupIfDue, db } from './db/connection.js';
 import { registerSSEClient } from './sse.js';
 import { familyRouter } from './routes/family.js';
 import { eventsRouter } from './routes/events.js';
@@ -21,6 +21,12 @@ import { syncAllEnabledCalendars } from './services/google.js';
 import { keepRouter } from './routes/keep.js';
 import { startKeepSyncLoop } from './services/keepSync.js';
 import { startSharedAlbumLoop } from './services/sharedAlbums.js';
+import { startIcsFeedLoop } from './services/icsFeeds.js';
+import { countdownsRouter } from './routes/countdowns.js';
+import { rewardsRouter } from './routes/rewards.js';
+import { routinesRouter } from './routes/routines.js';
+import { feedsRouter } from './routes/feeds.js';
+import { todayRouter } from './routes/today.js';
 
 initSchema();
 seedIfNeeded();
@@ -28,6 +34,28 @@ seedIfNeeded();
 const app = new Hono();
 
 // Health & LAN info (used by QR code handoff so phones on home Wi-Fi can connect easily!)
+/** Last successful Google / feed sync and any current errors, for the "showing saved data" badge. */
+function syncHealth() {
+  const g = db.prepare("SELECT MAX(last_synced_at) AS last, SUM(CASE WHEN sync_status = 'error' THEN 1 ELSE 0 END) AS errors, COUNT(*) AS n FROM google_accounts").get() as {
+    last: string | null;
+    errors: number | null;
+    n: number;
+  };
+  const f = db.prepare('SELECT MAX(last_synced_at) AS last, SUM(CASE WHEN sync_error IS NOT NULL THEN 1 ELSE 0 END) AS errors, COUNT(*) AS n FROM ics_feeds WHERE enabled = 1').get() as {
+    last: string | null;
+    errors: number | null;
+    n: number;
+  };
+  return {
+    googleAccounts: Number(g.n),
+    googleLastSyncedAt: g.last,
+    googleErrors: Number(g.errors || 0),
+    feeds: Number(f.n),
+    feedsLastSyncedAt: f.last,
+    feedErrors: Number(f.errors || 0),
+  };
+}
+
 app.get('/api/health', (c) => {
   const nets = os.networkInterfaces();
   const lanIps: string[] = [];
@@ -43,6 +71,7 @@ app.get('/api/health', (c) => {
     uptimeSec: Math.round(process.uptime()),
     lanIps,
     hostname: os.hostname(),
+    sync: syncHealth(),
   });
 });
 
@@ -90,6 +119,11 @@ app.route('/api/meals', mealsRouter);
 app.route('/api/photos', photosRouter);
 app.route('/api/settings', settingsRouter);
 app.route('/api/keep', keepRouter);
+app.route('/api/countdowns', countdownsRouter);
+app.route('/api/rewards', rewardsRouter);
+app.route('/api/routines', routinesRouter);
+app.route('/api/feeds', feedsRouter);
+app.route('/api/today', todayRouter);
 
 // Serve locally cached media (photos & recipe images) with immutable cache headers for 0ms repeat loads
 app.get('/media/:bucket/:file', (c) => {
@@ -158,14 +192,20 @@ startKeepSyncLoop();
 // Daily re-sync of shared Google Photos albums (new photos appear on the frame automatically)
 startSharedAlbumLoop();
 
-// Automated daily SQLite rolling backup every 24h
-setInterval(() => {
+// Read-only calendar feeds (school, sports, iCloud/Outlook links) refresh every 30 min
+startIcsFeedLoop();
+
+// Daily SQLite backup (keeps the newest 14). Checked at startup and every 30 min, so it still
+// happens when the device is restarted more often than once a day.
+const runBackupIfDue = () => {
   try {
-    performBackup();
-  } catch {
-    // ignore
+    backupIfDue();
+  } catch (err) {
+    console.error('Backup failed:', err instanceof Error ? err.message : err);
   }
-}, 24 * 60 * 60 * 1000).unref();
+};
+setTimeout(runBackupIfDue, 60_000).unref();
+setInterval(runBackupIfDue, 30 * 60 * 1000).unref();
 
 const port = Number(process.env.PORT || 3001);
 serve({ fetch: app.fetch, port, hostname: '0.0.0.0' }, (info) => {

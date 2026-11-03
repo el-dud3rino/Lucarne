@@ -352,6 +352,119 @@ export const migrations: Migration[] = [
       for (const it of items) setCat.run(classifyGroceryItem(it.text), it.id);
     },
   },
+  {
+    version: 9,
+    name: '009_family_extras',
+    up: (d: DatabaseSync) => {
+      d.exec(`
+        CREATE TABLE IF NOT EXISTS countdowns (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          emoji TEXT NOT NULL DEFAULT '🎉',
+          date_str TEXT NOT NULL,
+          member_id TEXT REFERENCES family_members(id) ON DELETE SET NULL,
+          created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS rewards (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          emoji TEXT NOT NULL DEFAULT '🎁',
+          cost INTEGER NOT NULL DEFAULT 10,
+          member_id TEXT REFERENCES family_members(id) ON DELETE CASCADE,
+          active INTEGER NOT NULL DEFAULT 1,
+          sort_order INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS reward_redemptions (
+          id TEXT PRIMARY KEY,
+          reward_id TEXT REFERENCES rewards(id) ON DELETE SET NULL,
+          member_id TEXT NOT NULL REFERENCES family_members(id) ON DELETE CASCADE,
+          title TEXT NOT NULL,
+          emoji TEXT NOT NULL DEFAULT '🎁',
+          cost INTEGER NOT NULL,
+          redeemed_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_redemptions_member ON reward_redemptions(member_id);
+
+        CREATE TABLE IF NOT EXISTS routines (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          emoji TEXT NOT NULL DEFAULT '🌅',
+          member_id TEXT NOT NULL REFERENCES family_members(id) ON DELETE CASCADE,
+          time_of_day TEXT NOT NULL DEFAULT 'morning',
+          days_of_week_json TEXT NOT NULL DEFAULT '[]',
+          stars INTEGER NOT NULL DEFAULT 0,
+          sort_order INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS routine_steps (
+          id TEXT PRIMARY KEY,
+          routine_id TEXT NOT NULL REFERENCES routines(id) ON DELETE CASCADE,
+          title TEXT NOT NULL,
+          emoji TEXT NOT NULL DEFAULT '✅',
+          sort_order INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_routine_steps ON routine_steps(routine_id, sort_order);
+
+        CREATE TABLE IF NOT EXISTS routine_step_checks (
+          step_id TEXT NOT NULL REFERENCES routine_steps(id) ON DELETE CASCADE,
+          date_str TEXT NOT NULL,
+          checked_at TEXT NOT NULL,
+          PRIMARY KEY (step_id, date_str)
+        );
+
+        CREATE TABLE IF NOT EXISTS habits (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          emoji TEXT NOT NULL DEFAULT '💧',
+          member_id TEXT NOT NULL REFERENCES family_members(id) ON DELETE CASCADE,
+          target_per_day INTEGER NOT NULL DEFAULT 1,
+          unit TEXT NOT NULL DEFAULT '',
+          sort_order INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS habit_logs (
+          habit_id TEXT NOT NULL REFERENCES habits(id) ON DELETE CASCADE,
+          date_str TEXT NOT NULL,
+          count INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (habit_id, date_str)
+        );
+
+        CREATE TABLE IF NOT EXISTS ics_feeds (
+          id TEXT PRIMARY KEY,
+          url TEXT NOT NULL,
+          name TEXT NOT NULL,
+          member_ids_json TEXT NOT NULL DEFAULT '[]',
+          category TEXT DEFAULT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          event_count INTEGER NOT NULL DEFAULT 0,
+          last_synced_at TEXT,
+          sync_error TEXT,
+          created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS grocery_history (
+          name_key TEXT PRIMARY KEY,
+          text TEXT NOT NULL,
+          category TEXT NOT NULL,
+          add_count INTEGER NOT NULL DEFAULT 0,
+          last_added_at TEXT NOT NULL,
+          hidden INTEGER NOT NULL DEFAULT 0
+        );
+      `);
+      if (!columnExists('events', 'travel_minutes')) {
+        d.exec('ALTER TABLE events ADD COLUMN travel_minutes INTEGER DEFAULT NULL');
+      }
+      if (!columnExists('events', 'driver_member_id')) {
+        d.exec('ALTER TABLE events ADD COLUMN driver_member_id TEXT DEFAULT NULL');
+      }
+      if (!columnExists('events', 'ics_feed_id')) {
+        d.exec('ALTER TABLE events ADD COLUMN ics_feed_id TEXT DEFAULT NULL');
+      }
+      d.exec('CREATE INDEX IF NOT EXISTS idx_events_ics ON events(ics_feed_id)');
+    },
+  },
 ];
 
 export function initSchema(): void {

@@ -8,6 +8,7 @@ import { parseItemInput } from '../../shared/ingredientAggregator.js';
 import {
   type AppSettings,
   type GroceryCategory,
+  type GroceryQuickItem,
   type ListItem,
   type TaskList,
 } from '../../shared/types.js';
@@ -55,6 +56,17 @@ export const ListsView: React.FC = () => {
   });
 
   // 0ms Optimistic Add Item with parseItemInput to prevent string flicker
+  const { data: quickItems = [] } = useQuery({
+    queryKey: ['lists', activeList?.id, 'quick-items'],
+    queryFn: () => apiFetch<GroceryQuickItem[]>(`/api/lists/${activeList!.id}/quick-items`),
+    enabled: Boolean(activeList?.id && activeList.isGrocery),
+  });
+  const [managingQuick, setManagingQuick] = useState(false);
+  const hideQuickMutation = useMutation({
+    mutationFn: (nameKey: string) => apiFetch('/api/lists/quick-items/hide', { method: 'POST', body: JSON.stringify({ nameKey }) }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['lists', activeList?.id, 'quick-items'] }),
+  });
+
   const addItemMutation = useMutation({
     mutationFn: async (vars: { text: string; quantity?: string }) =>
       apiFetch<ListItem>(`/api/lists/${activeList!.id}/items`, {
@@ -231,6 +243,20 @@ export const ListsView: React.FC = () => {
   });
 
   const uncheckedItems = useMemo(() => items.filter((i) => !i.checked), [items]);
+
+  // Learned "usual" items first; fill with common staples until there's enough history.
+  const quickTiles = useMemo(() => {
+    const onList = new Set(uncheckedItems.map((i) => i.text.trim().toLowerCase()));
+    const tiles: Array<{ key: string; text: string; learned: boolean }> = quickItems.map((q) => ({ key: q.nameKey, text: q.text, learned: true }));
+    const have = new Set(tiles.map((t) => t.text.toLowerCase()));
+    if (tiles.length < 8) {
+      for (const st of QUICK_STAPLES) {
+        if (tiles.length >= 10) break;
+        if (!have.has(st.toLowerCase()) && !onList.has(st.toLowerCase())) tiles.push({ key: `staple-${st}`, text: st, learned: false });
+      }
+    }
+    return tiles.slice(0, 12);
+  }, [quickItems, uncheckedItems]);
   const checkedItems = useMemo(() => items.filter((i) => i.checked), [items]);
 
   const groupedUnchecked = useMemo(() => {
@@ -429,23 +455,36 @@ export const ListsView: React.FC = () => {
               </button>
             </form>
 
-            {/* 1-Tap Staples Bar for Grocery Lists */}
+            {/* 1-tap "usual items" bar: learned from what this household adds, staples until then */}
             {activeList.isGrocery && (
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5" data-testid="quick-add">
                 <span className="text-xs font-bold uppercase tracking-wider text-stone-400 mr-1 flex items-center gap-1 shrink-0">
                   <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                  Quick Add:
+                  {quickItems.length >= 4 ? 'Usual:' : 'Quick Add:'}
                 </span>
-                {QUICK_STAPLES.map((staple) => (
+                {quickTiles.map((tile) => (
                   <button
-                    key={staple}
+                    key={tile.key}
                     type="button"
-                    onClick={() => addItemMutation.mutate({ text: staple })}
-                    className="h-10 min-h-[40px] px-3.5 rounded-xl bg-white hover:bg-emerald-50 active:scale-95 border border-stone-200 text-xs font-bold text-slate-700 shrink-0 transition flex items-center justify-center"
+                    onClick={() => (managingQuick && tile.learned ? hideQuickMutation.mutate(tile.key) : addItemMutation.mutate({ text: tile.text }))}
+                    className={`h-10 min-h-[40px] px-3.5 rounded-xl active:scale-95 border text-xs font-bold shrink-0 transition flex items-center justify-center ${
+                      managingQuick && tile.learned
+                        ? 'bg-rose-50 border-rose-200 text-rose-700'
+                        : 'bg-white hover:bg-emerald-50 border-stone-200 text-slate-700'
+                    }`}
                   >
-                    + {staple}
+                    {managingQuick && tile.learned ? '✕' : '+'} {tile.text}
                   </button>
                 ))}
+                {quickItems.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setManagingQuick((v) => !v)}
+                    className="h-10 min-h-[40px] px-3 rounded-xl text-xs font-bold text-stone-500 hover:bg-stone-100 shrink-0"
+                  >
+                    {managingQuick ? 'Done' : 'Edit'}
+                  </button>
+                )}
               </div>
             )}
           </div>

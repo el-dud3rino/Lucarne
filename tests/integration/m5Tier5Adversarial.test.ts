@@ -606,16 +606,16 @@ test('Milestone 5 Phase 2 — Tier 5 Adversarial Audit Suite', async (t) => {
       assert.equal(backupMembers.c, initialCount, 'Backup must contain exact member count');
       backupDb.close();
 
-      // 3. Backup pruning test: produce 10 backups and verify at most 7 remain
-      for (let i = 0; i < 9; i++) {
+      // 3. Backup pruning test: produce 20 backups and verify at most 14 (two weeks) remain
+      for (let i = 0; i < 19; i++) {
         performBackup();
       }
       const retainedBackups = fs
         .readdirSync(BACKUPS_DIR)
         .filter((f) => f.startsWith('lucarne-') && f.endsWith('.db'));
       assert.ok(
-        retainedBackups.length <= 7,
-        `Retained backups (${retainedBackups.length}) must be <= 7 after pruning`
+        retainedBackups.length <= 14,
+        `Retained backups (${retainedBackups.length}) must be <= 14 after pruning`
       );
     });
 

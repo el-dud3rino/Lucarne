@@ -1,8 +1,8 @@
 # Lucarne
 
-A fast, local-first, open-source family hub for a wall-mounted touchscreen: shared family calendar, chores, grocery lists, meal planning, and a photo screensaver. It's designed for a **1920×1080 landscape touchscreen** driven by a Raspberry Pi 5 or a small Linux PC, and phones on your home Wi-Fi get a companion app for free.
+A fast, local-first, open-source family hub for a wall-mounted touchscreen: shared family calendar, chores, routines and rewards, grocery lists, meal planning, and a photo screensaver. It's designed for a **1920×1080 landscape touchscreen** driven by a Raspberry Pi 5 or a small Linux PC, and phones on your home Wi-Fi get a companion app for free.
 
-Inspired by the Skylight Calendar, but self-hosted: your family's data lives in one SQLite file on your own device. *Lucarne is an independent project and is not affiliated with or endorsed by Skylight.*
+Inspired by the Skylight Calendar, but self-hosted: your family's data lives in one SQLite file on your own device. **No subscription:** features that other family displays put behind a yearly plan, like rewards, meal planning, the photo frame and AI import from photos, are all included. *Lucarne is an independent project and is not affiliated with or endorsed by Skylight.*
 
 > **Status:** early and actively developed. Expect rough edges, and please report bugs through GitHub Issues.
 
@@ -11,15 +11,26 @@ Inspired by the Skylight Calendar, but self-hosted: your family's data lives in 
 <table>
   <tr>
     <td width="50%"><img src="docs/screenshots/calendar-month.jpg" alt="Month view with birthdays and holidays"><br><sub><b>Month view</b>: birthdays 🎂 and holidays 🎉 in their own colors</sub></td>
-    <td width="50%"><img src="docs/screenshots/chores.jpg" alt="Chores per person with stars"><br><sub><b>Chores</b>: per-person routines and stars</sub></td>
+    <td width="50%"><img src="docs/screenshots/chores.jpg" alt="Chores per person with stars"><br><sub><b>Chores</b>: per-person chores and stars</sub></td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/groceries.jpg" alt="Grocery list sorted by aisle"><br><sub><b>Groceries</b>: auto-sorted by aisle, in your store's order</sub></td>
+    <td><img src="docs/screenshots/routines.jpg" alt="Morning and bedtime routines as checklists"><br><sub><b>Routines</b>: step-by-step morning and bedtime checklists</sub></td>
+    <td><img src="docs/screenshots/kid-mode.jpg" alt="Kid mode with big tiles"><br><sub><b>Kid Mode</b>: one child's day with big, emoji-first tiles</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/rewards.jpg" alt="Star tracker with rewards"><br><sub><b>Rewards</b>: spend stars on rewards you set up together</sub></td>
+    <td><img src="docs/screenshots/habits.jpg" alt="Habit tracking with streaks"><br><sub><b>Habits</b>: daily goals, a 7-day strip and streaks</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/magic-import.jpg" alt="Magic Import from a photo or email"><br><sub><b>Magic Import</b>: snap a flyer or paste an email, review, add</sub></td>
+    <td><img src="docs/screenshots/groceries.jpg" alt="Grocery list sorted by aisle"><br><sub><b>Groceries</b>: sorted by aisle, with your family's usual items one tap away</sub></td>
+  </tr>
+  <tr>
     <td><img src="docs/screenshots/meals.jpg" alt="Weekly meal planner"><br><sub><b>Meal planner</b>: send the week's ingredients to the list</sub></td>
+    <td><img src="docs/screenshots/cook-mode.jpg" alt="Cook mode"><br><sub><b>Cook Mode</b>: big text, the screen stays awake</sub></td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/cook-mode.jpg" alt="Cook mode"><br><sub><b>Cook Mode</b>: big text, the screen stays awake</sub></td>
-    <td><img src="docs/screenshots/screensaver.jpg" alt="Photo screensaver with clock and next event"><br><sub><b>Screensaver</b>: your photos, the time, weather and what's next</sub></td>
+    <td colspan="2"><img src="docs/screenshots/screensaver.jpg" alt="Photo screensaver with today's brief"><br><sub><b>Photo frame</b>: your photos with today's brief: when to leave, events, dinner, chores left, countdowns and a jacket/umbrella hint</sub></td>
   </tr>
 </table>
 
@@ -49,6 +60,7 @@ Inspired by the Skylight Calendar, but self-hosted: your family's data lives in 
 - [Development & tests](#development--tests)
 - [Privacy](#privacy)
 - [Credits & acknowledgements](#credits--acknowledgements)
+- [Roadmap](#roadmap)
 - [License](#license)
 
 ---
@@ -62,16 +74,24 @@ Inspired by the Skylight Calendar, but self-hosted: your family's data lives in 
 - **Birthdays 🎂 and holidays 🎉** get their own colors, with toolbar toggles to show or hide them. Google's holiday and birthday calendars are recognized automatically, and a birthday that appears in two calendars shows once.
 - **10-day weather** on each day, plus tonight's dinner on the calendar.
 - Recurring and multi-day events, and color-coded family members with tap-to-filter.
+- **Calendar links (read-only):** subscribe to any `.ics` / `webcal://` link, such as a school district calendar, TeamSnap or GameChanger schedule, or a family member's iCloud or Outlook calendar. Assign it to people, and it refreshes every 30 minutes.
+- **Magic Import** (with a Gemini key): take a photo of a school flyer, sports schedule or invitation, or paste an email, and Lucarne finds the dates. You review and edit every event before anything is added.
+- **Countdowns:** "🏖️ Lake House Weekend · 15 days" chips on the calendar, the photo frame and Kid Mode.
+- **Leave-by alerts:** give an event a drive time and a driver. A banner then shows on every screen, e.g. "Leave in 12 min · Soccer at 5:30 · Dad driving".
 - **Sync Now** in Settings shows progress and the result, including exactly which calendar failed and why.
 
-**Chores & stars**
-- Morning, afternoon, evening, or anytime routines (daily, weekdays, weekends, specific days, or one-off).
-- Assigned chores and "up for grabs" chores, with an internal star tracker for kids *and* parents. It's meant to pair with a physical star chart.
+**Chores, routines, habits & rewards**
+- Chores for morning, afternoon, evening or anytime (daily, weekdays, weekends, specific days, or one-off). Chores can be assigned or "up for grabs".
+- **Routines:** ordered checklists like "School morning" or "Bedtime", one per child, with step emojis and ready-made templates. An optional star bonus is given when every step is done. The routine for the current time of day shows first.
+- **Habits:** daily goals like water, reading minutes or piano, with a 7-day strip and a 🔥 streak.
+- **Rewards:** set up rewards ("Pick the movie · 15 ⭐"), redeem them to spend stars, and see the history with undo. Stars come from chores and finished routines, for kids *and* parents.
+- **Kid Mode:** a full-screen view of one child's day with big tiles: today's events, their routine, chores, habits, countdowns and star balance. It's made for kids who can't read yet.
 
 **Lists & groceries**
 - Multiple lists, with groceries auto-sorted by store aisle and quantities merged ("2 cans" + "1 can").
 - Aisles are picked by the most specific match ("chicken broth" goes to Pantry, not Meat). If one is wrong, tap **⇄** on the item to move it, and Lucarne remembers that choice every time the item is added again.
 - **Store order:** arrange the aisles in the order you walk your store.
+- **Usual items:** one-tap tiles for what your family adds most often (learned from the list, and never from recipe ingredients). Items already on the list are hidden, and **Edit** removes a tile.
 - Live updates between the wall and phones.
 
 **Meals**
@@ -79,6 +99,7 @@ Inspired by the Skylight Calendar, but self-hosted: your family's data lives in 
 - Recipe import from a URL without the ads and life stories (schema.org data, with optional Gemini fallback). The dish photo is saved locally.
 - **Meal search** (with a Gemini key): describe what you want ("easy chicken tacos") and get **real recipes from real recipe sites**, with their own photos. Nothing is invented: every result is a page Lucarne opened and verified.
 - A **recipe preview** with servings, prep and cook time, and calories, protein, carbs and fat per serving, as published by the site.
+- **Plan my week:** fills the empty dinner nights **only with recipes from your own Recipe Box**. With a Gemini key it picks for variety and follows notes like "quick on Tuesday, no fish". Without a key, or when Gemini is busy, it rotates your recipes, favorites and least-recently-cooked first. You can swap any night before saving.
 - Send a week's ingredients to the grocery list, combining duplicates.
 - Bulk import from a JSON file of meals.
 
@@ -86,10 +107,13 @@ Inspired by the Skylight Calendar, but self-hosted: your family's data lives in 
 - Pick photos with Google's official Photos Picker (up to 2,000 per pick), add **whole shared albums of any size** by link (they re-sync daily), or upload your own.
 - Photos are stored locally, so links never expire and the frame works offline.
 - Portrait photos are paired side by side, the order shuffles every time, and a night mode dims or shows just a clock.
+- **Today's brief** on the frame: when to leave, what's left today, dinner, who still has chores, countdowns, and a clothing hint from the forecast ("☔ Rain likely: grab rain jackets"). It can be turned off in Settings.
 
 **Built for a wall**
 - Built-in on-screen keyboard that appears when you tap a text box and closes when you submit, plus large touch targets, no loading spinners, and a tap-to-pick emoji picker.
 - Errors are shown in plain language, can be selected and copied, and stay until dismissed.
+- **Keeps working when the internet doesn't:** the wall runs on its own data. A small header chip says when you're looking at saved data ("Offline · saved data from 10:42", "Google sync paused · last 9:15"). The last forecast is kept on the device.
+- **Automatic daily backups** (the last 14 are kept), with a one-tap **Restore** in Settings. A safety copy is taken first, so a restore can be undone.
 - Optional **Google Keep** sync, so "Hey Google, add milk to my shopping list" shows up on the wall. Per-person chore lists can sync to Keep too.
 
 ## How it works
@@ -102,7 +126,7 @@ One Node.js process serves the API, the web app, and a live update stream, backe
 | Web app | React 19, Vite, Tailwind CSS v4, TanStack Query, lucide icons |
 | Integrations | Google Calendar API, Google Photos Picker API, Open-Meteo weather, optional Gemini; optional Python helper for Google Keep |
 
-Everything works offline except syncing with Google, the weather, and importing or searching for recipes.
+Everything works offline except syncing with Google and calendar links, the weather, and the Gemini features (Magic Import, meal search, AI week planning).
 
 ## Hardware
 
@@ -170,6 +194,16 @@ Get a free API key at [Google AI Studio](https://aistudio.google.com/apikey), th
 - `GEMINI_PAID_TIER=1` turns off Lucarne's own free-tier limits if your key has billing enabled.
 
 Some large recipe sites (for example Allrecipes, EatingWell, Budget Bytes and Simply Recipes) block automated downloads, so importing their URLs fails with "HTTP 403", and meal search skips them. For those, use JSON import below, or add the recipe by hand.
+
+### Magic Import & Plan my week (Gemini)
+Both use the same Gemini key as meal search. **Magic Import** (Calendar → ✨ Magic Import) sends the photo or text to Gemini. It returns draft events for you to check, and nothing is saved until you tap **Add**. Photos are shrunk to 2,000 px before upload. **Plan my week** (Meals) sends only your recipe titles and tags, never invents a recipe, and falls back to a simple rotation if Gemini is unavailable.
+
+### Calendar links (school, sports, iCloud, Outlook)
+In **Settings → Calendar Links**, paste a subscribe link (`https://…ics` or `webcal://…`), choose whose events they are, and optionally mark it as a birthday or holiday calendar. The events are read-only on the wall; change them at the source. Lucarne checks each link every 30 minutes. If a download fails, the last good copy stays on the calendar and the error appears in Settings. Where to find links:
+- **School / district:** usually a "Subscribe" or "iCal" button on the calendar page.
+- **TeamSnap, GameChanger, SportsEngine:** schedule → Export/Sync calendar.
+- **iCloud:** Calendar app → share a calendar → **Public Calendar** → copy the link.
+- **Outlook.com:** Settings → Calendar → Shared calendars → **Publish a calendar** → ICS link.
 
 ### Importing recipes from JSON
 Bring an existing recipe collection in through **Meals → Import → JSON Meals Seed**, or from the command line:
@@ -320,7 +354,7 @@ sudo systemctl restart lucarne
 ```
 Database changes are applied automatically on start.
 
-**Backups:** Lucarne snapshots the database daily into `data/backups/`, and you can trigger one in Settings. To move or restore an install, copy the whole `data/` folder; it holds the database, downloaded photos, and Keep credentials.
+**Backups:** Lucarne snapshots the database every day into `data/backups/` and keeps the last 14. You can also take one with **Settings → Backup Now**. **Restore** restores any of them in place, with no restart; a safety copy of the current data is saved first, so a restore can be undone the same way. For an off-device copy, copy `data/backups/` (or the whole `data/` folder, which also holds downloaded photos and Keep credentials) to a USB stick or NAS now and then.
 
 **Troubleshooting:**
 - **Google errors** are shown in plain language in Settings, with a fix link and a Copy button.
@@ -329,6 +363,8 @@ Database changes are applied automatically on start.
 - **"Gemini's free daily limit is used up"** or **"Gemini is busy right now":** the free tier allows only about 20 requests a day per Flash model, and Google is sometimes overloaded. Wait for the reset time shown, or add billing to the key and set `GEMINI_PAID_TIER=1`.
 - **Meal search finds nothing:** try simpler words ("chicken tacos"), or paste a recipe link into **Strip Recipe Website URL**. Some sites block downloads and are skipped.
 - **An item is in the wrong grocery aisle:** tap **⇄** on it and pick the right aisle. Lucarne remembers that choice.
+- **A calendar link stopped updating:** Settings → Calendar Links shows the error. Common causes are a link that is no longer shared, or a school that changed its calendar URL. The last good copy stays on the calendar meanwhile.
+- **"Leave in…" banner never shows:** it needs a drive time on the event (Edit event → Getting there).
 - **Server logs:** `journalctl -u lucarne -f`.
 
 ## Development & tests
@@ -355,7 +391,8 @@ Project layout: `src/server` (API, sync services, database migrations), `src/cli
 There is no Lucarne cloud. Everything is stored on your own device. Data goes only to:
 - Google's own services, for the features you connect;
 - Open-Meteo, for weather at the location you set;
-- Gemini, if you add a key: your meal-search words and, for pages without structured recipe data, the page text;
+- Gemini, if you add a key: your meal-search words; for pages without structured recipe data, the page text; the photo or text you give **Magic Import**; and your recipe titles and planning notes for **Plan my week**;
+- the calendar-link (.ics) addresses you add, which Lucarne downloads every 30 minutes;
 - the recipe websites whose pages you import or that meal search checks (Lucarne downloads those pages and photos like a browser would).
 
 See [`docs/privacy.html`](docs/privacy.html).
@@ -377,6 +414,14 @@ Lucarne stands on the shoulders of these projects. Thank you!
 **Inspiration:** the [Skylight Calendar](https://www.skylightframe.com/). Lucarne is not affiliated with Skylight.
 
 All product names and trademarks belong to their owners. Lucarne's unofficial integrations are not endorsed by Google and may stop working if Google changes its services.
+
+## Roadmap
+
+Planned next:
+- Striped colors for events with several people.
+- A "today at a glance" Home screen: today's calendar on the left, per-person chores and lists on the right.
+
+Backlogged: a Home Assistant / webhook integration.
 
 ## License
 

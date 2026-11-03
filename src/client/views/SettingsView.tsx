@@ -30,6 +30,8 @@ import { CATEGORY_STYLES, EVENT_CATEGORIES, type EventCategory } from '../../sha
 import { CopyButton, Linkify, NoticeBanner, type NoticeTone } from '../components/NoticeBanner.js';
 import { WeatherWidget } from '../components/WeatherWidget.js';
 import { KeepSyncSection } from '../components/KeepSyncSection.js';
+import { CalendarFeedsSection } from '../components/CalendarFeedsSection.js';
+import { BackupsSection } from '../components/BackupsSection.js';
 import {
   SKYLIGHT_COLOR_PRESETS,
   type AppSettings,
@@ -529,6 +531,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, members })
                 onChange={(e) =>
                   updateSettingsMutation.mutate({ showDinnerOnCalendar: e.target.checked })
                 }
+                className="w-5 h-5 rounded cursor-pointer"
+              />
+            </label>
+
+            <label className="flex items-center justify-between p-3 rounded-2xl bg-stone-50 border border-stone-200 cursor-pointer min-h-[44px]">
+              <div>
+                <div className="font-bold text-sm text-slate-800">Show Today's Brief on the Photo Frame</div>
+                <div className="text-xs text-stone-500">
+                  Today's events, when to leave, dinner, chores left, countdowns and a jacket/umbrella hint
+                </div>
+              </div>
+              <input
+                type="checkbox"
+                checked={settings.showBriefOnScreensaver}
+                onChange={(e) => updateSettingsMutation.mutate({ showBriefOnScreensaver: e.target.checked })}
                 className="w-5 h-5 rounded cursor-pointer"
               />
             </label>
@@ -1128,6 +1145,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, members })
         </section>
 
         {/* 5b. Google Keep two-way list sync */}
+        <CalendarFeedsSection members={members} />
+
         <KeepSyncSection members={members} />
 
         {/* 6. Family Profiles & Colors (Heading verbatim for E2E tests) */}
@@ -1294,26 +1313,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, members })
             </div>
           </div>
 
-          <div className="pt-2 border-t border-stone-100 flex items-center justify-between">
-            <div className="text-xs text-stone-500">
-              <div className="font-bold text-slate-700 flex items-center gap-1.5">
-                <Database className="w-3.5 h-3.5 text-emerald-600" />
-                SQLite WAL Local Storage
-              </div>
-              <div>
-                {settings.lastBackupAt
-                  ? `Last snapshot: ${new Date(settings.lastBackupAt).toLocaleString()}`
-                  : 'Automatic daily rolling backups enabled'}
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={triggerBackup}
-              className="px-4 h-10 min-h-[40px] min-w-[40px] rounded-xl bg-stone-100 hover:bg-stone-200 text-slate-800 font-bold text-xs"
-            >
-              Backup Now
-            </button>
-          </div>
+          <BackupsSection lastBackupAt={settings.lastBackupAt} />
         </section>
       </div>
 

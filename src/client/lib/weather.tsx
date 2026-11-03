@@ -34,10 +34,36 @@ export function weatherVisual(code: number): { Icon: LucideIcon; color: string; 
   return { Icon: Sun, color: 'text-amber-500', label: 'Sunny' };
 }
 
+const cacheKey = (lat: number, lon: number, unit: string) => `lucarne.forecast.${lat.toFixed(2)},${lon.toFixed(2)},${unit}`;
+
+/** Last good forecast from this browser, so the wall still shows weather when the internet is down. */
+function readCachedForecast(lat: number, lon: number, unit: string): { map: Map<string, DayForecast>; at: number } | undefined {
+  try {
+    const raw = localStorage.getItem(cacheKey(lat, lon, unit));
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw) as { at: number; days: Array<[string, DayForecast]> };
+    if (!Array.isArray(parsed.days) || Date.now() - parsed.at > 10 * 86_400_000) return undefined;
+    return { map: new Map(parsed.days), at: parsed.at };
+  } catch {
+    return undefined;
+  }
+}
+
+function writeCachedForecast(lat: number, lon: number, unit: string, map: Map<string, DayForecast>) {
+  try {
+    localStorage.setItem(cacheKey(lat, lon, unit), JSON.stringify({ at: Date.now(), days: [...map.entries()] }));
+  } catch {
+    // storage full / blocked: not important
+  }
+}
+
 /** 10-day daily forecast keyed by local YYYY-MM-DD (Open-Meteo, no API key). */
 export function useDailyForecast(lat: number, lon: number, unit: 'F' | 'C') {
+  const cached = readCachedForecast(lat, lon, unit);
   return useQuery({
     queryKey: ['weather-daily', lat, lon, unit],
+    initialData: cached?.map,
+    initialDataUpdatedAt: cached?.at,
     queryFn: async () => {
       const tempUnit = unit === 'F' ? 'fahrenheit' : 'celsius';
       const url =
@@ -69,6 +95,7 @@ export function useDailyForecast(lat: number, lon: number, unit: 'F' | 'C') {
           precipChance: d.precipitation_probability_max?.[i] ?? null,
         });
       });
+      writeCachedForecast(lat, lon, unit, map);
       return map;
     },
     staleTime: 30 * 60 * 1000,

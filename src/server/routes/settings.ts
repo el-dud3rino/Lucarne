@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { db, performBackup, runTransaction } from '../db/connection.js';
+import { db, listBackups, performBackup, restoreBackup, runTransaction } from '../db/connection.js';
 import { DEFAULT_SETTINGS } from '../db/seed.js';
 import { broadcastInvalidate } from '../sse.js';
 import {
@@ -62,6 +62,7 @@ export function loadAppSettings(): AppSettings & {
     ),
     showBirthdays: Boolean(map.showBirthdays ?? DEFAULT_SETTINGS.showBirthdays),
     showHolidays: Boolean(map.showHolidays ?? DEFAULT_SETTINGS.showHolidays),
+    showBriefOnScreensaver: Boolean(map.showBriefOnScreensaver ?? DEFAULT_SETTINGS.showBriefOnScreensaver),
     groceryAisleOrder: orderAisles(Array.isArray(map.groceryAisleOrder) ? (map.groceryAisleOrder as string[]) : null),
     defaultGroceryListId: String(
       map.defaultGroceryListId ?? DEFAULT_SETTINGS.defaultGroceryListId
@@ -108,6 +109,7 @@ settingsRouter.put('/', async (c) => {
     'showDinnerOnCalendar',
     'showBirthdays',
     'showHolidays',
+    'showBriefOnScreensaver',
     'groceryAisleOrder',
     'defaultGroceryListId',
     'googleClientId',
@@ -133,6 +135,19 @@ settingsRouter.post('/backup', (c) => {
   const file = performBackup();
   broadcastInvalidate(['settings']);
   return c.json({ ok: true, file });
+});
+
+settingsRouter.get('/backups', (c) => c.json(listBackups()));
+
+/** Replaces everything with a backup (a safety copy of the current data is saved first). */
+settingsRouter.post('/backups/:name/restore', (c) => {
+  try {
+    const result = restoreBackup(c.req.param('name'));
+    broadcastInvalidate(['family', 'events', 'chores', 'lists', 'meals', 'recipes', 'photos', 'settings', 'countdowns', 'rewards', 'routines', 'habits']);
+    return c.json({ ok: true, ...result });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : 'Restore failed' }, 400);
+  }
 });
 
 // Multi-Account Google OAuth & Calendar-to-Member Mapping

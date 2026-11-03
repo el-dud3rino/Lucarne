@@ -1,15 +1,21 @@
 import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  Car,
   ChevronLeft,
   ChevronRight,
   Clock,
+  Hourglass,
+  Lock,
   MapPin,
   Plus,
   Trash2,
   Utensils,
+  Wand2,
   X,
 } from 'lucide-react';
+import { CountdownStrip, CountdownsSheet } from '../components/Countdowns.js';
+import { MagicImportSheet } from '../components/MagicImport.js';
 import { apiFetch } from '../lib/api.js';
 import { DayWeather, useDailyForecast } from '../lib/weather.js';
 import { CATEGORY_STYLES, EVENT_CATEGORIES, type EventCategory } from '../../shared/eventCategories.js';
@@ -62,6 +68,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   });
 
   const [editingEvent, setEditingEvent] = useState<Partial<CalendarEvent> | null>(null);
+  const [showMagic, setShowMagic] = useState(false);
+  const [countdownSheet, setCountdownSheet] = useState<null | { initial?: { title: string; dateStr: string; emoji: string; memberId: string | null } }>(null);
 
   const memberMap = useMemo(() => {
     const m = new Map<string, FamilyMember>();
@@ -323,6 +331,15 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             <span className="truncate">{ev.location}</span>
           </div>
         )}
+        {(Boolean(ev.driverMemberId) || (ev.travelMinutes ?? 0) > 0) && (
+          <div className="text-xs opacity-80 mt-1 flex items-center gap-1 font-semibold">
+            <Car className="w-3 h-3 shrink-0" />
+            <span className="truncate">
+              {ev.driverMemberId && memberMap.get(ev.driverMemberId) ? `${memberMap.get(ev.driverMemberId)!.name} driving` : 'Drive'}
+              {ev.travelMinutes ? ` · leave ${formatTimeShort(new Date(Date.parse(ev.startIso) - ev.travelMinutes * 60_000).toISOString())}` : ''}
+            </span>
+          </div>
+        )}
       </button>
     );
   };
@@ -515,14 +532,36 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 
           <button
             type="button"
+            onClick={() => setCountdownSheet({})}
+            title="Countdowns"
+            aria-label="Countdowns"
+            className="h-11 min-w-[44px] px-3 rounded-2xl bg-white border border-stone-200 text-amber-600 font-bold text-sm flex items-center gap-2 shadow-2xs active:scale-95 shrink-0"
+          >
+            <Hourglass className="w-5 h-5" />
+            <span className="hidden 2xl:inline text-slate-700">Countdowns</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowMagic(true)}
+            title="Magic Import: add events from a photo or email"
+            aria-label="Magic Import"
+            className="h-11 min-w-[44px] px-3 rounded-2xl bg-violet-50 border border-violet-200 text-violet-700 font-bold text-sm flex items-center gap-2 shadow-2xs active:scale-95 shrink-0"
+          >
+            <Wand2 className="w-5 h-5" />
+            <span className="hidden xl:inline">Magic Import</span>
+          </button>
+          <button
+            type="button"
             onClick={() => openNewEventForDay(anchorDate)}
-            className="h-11 px-4 rounded-2xl bg-sky-600 hover:bg-sky-700 active:scale-95 text-white font-bold text-sm flex items-center gap-2 shadow-sm"
+            className="h-11 px-4 rounded-2xl bg-sky-600 hover:bg-sky-700 active:scale-95 text-white font-bold text-sm flex items-center gap-2 shadow-sm shrink-0"
           >
             <Plus className="w-5 h-5" />
             <span className="hidden sm:inline">Add Event</span>
           </button>
         </div>
       </div>
+
+      <CountdownStrip members={members} onOpen={() => setCountdownSheet({})} />
 
       {/* Main Calendar Grid Area */}
       <div className="flex-1 min-h-0">
@@ -661,7 +700,31 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             editingEvent.id ? () => deleteMutation.mutate(editingEvent.id!) : undefined
           }
           saving={saveMutation.isPending}
+          onCountdown={(ev) => {
+            setEditingEvent(null);
+            setCountdownSheet({
+              initial: {
+                title: ev.title || '',
+                dateStr: ev.allDay ? ev.startIso!.slice(0, 10) : toDateStr(new Date(ev.startIso!)),
+                emoji: ev.category === 'birthday' ? '🎂' : '🎉',
+                memberId: ev.memberIds?.[0] ?? null,
+              },
+            });
+          }}
         />
+      )}
+
+      {showMagic && (
+        <MagicImportSheet
+          members={members}
+          defaultMemberIds={selectedMemberIds}
+          geminiConfigured={settings.geminiApiKeyConfigured}
+          onClose={() => setShowMagic(false)}
+        />
+      )}
+
+      {countdownSheet && (
+        <CountdownsSheet members={members} initial={countdownSheet.initial} onClose={() => setCountdownSheet(null)} />
       )}
     </div>
   );
@@ -674,7 +737,10 @@ interface EventModalProps {
   onSave: (draft: Partial<CalendarEvent>) => void;
   onDelete?: () => void;
   saving: boolean;
+  onCountdown: (ev: Partial<CalendarEvent>) => void;
 }
+
+const TRAVEL_CHOICES = [0, 10, 15, 20, 30, 45, 60];
 
 const EventModal: React.FC<EventModalProps> = ({
   draft,
@@ -683,7 +749,11 @@ const EventModal: React.FC<EventModalProps> = ({
   onSave,
   onDelete,
   saving,
+  onCountdown,
 }) => {
+  const readOnly = Boolean(draft.icsFeedId);
+  const [travelMinutes, setTravelMinutes] = useState<number>(draft.travelMinutes ?? 0);
+  const [driverMemberId, setDriverMemberId] = useState<string | null>(draft.driverMemberId ?? null);
   const initialStart = draft.startIso ? new Date(draft.startIso) : new Date();
   const initialEnd = draft.endIso ? new Date(draft.endIso) : new Date(initialStart.getTime() + 3600_000);
 
@@ -752,6 +822,8 @@ const EventModal: React.FC<EventModalProps> = ({
       endIso,
       recurrenceRule: recurrenceRule === 'none' ? null : (recurrenceRule as any),
       memberIds,
+      travelMinutes: allDay ? null : travelMinutes || null,
+      driverMemberId,
     });
   };
 
@@ -779,6 +851,14 @@ const EventModal: React.FC<EventModalProps> = ({
           </button>
         </div>
 
+        {readOnly && (
+          <div className="p-3 rounded-2xl bg-stone-100 border border-stone-200 text-sm text-stone-600 font-semibold flex items-start gap-2">
+            <Lock className="w-4 h-4 mt-0.5 shrink-0" />
+            This event comes from a subscribed calendar link, so it can't be changed here. Edit it at the source (school, team app, iCloud…).
+          </div>
+        )}
+
+        <fieldset disabled={readOnly} className="space-y-4 min-w-0">
         <div>
           <input
             type="text"
@@ -961,8 +1041,52 @@ const EventModal: React.FC<EventModalProps> = ({
           />
         </div>
 
+        {/* Getting there: travel time drives the "leave in 10 min" banner; driver shows on the card */}
+        {!allDay && (
+          <div className="space-y-2">
+            <label className="block text-xs font-bold uppercase tracking-wider text-stone-400">
+              Getting there <span className="normal-case font-semibold">(only on Lucarne)</span>
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {TRAVEL_CHOICES.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setTravelMinutes(m)}
+                  className={`h-10 min-h-[40px] px-3 rounded-xl text-xs font-bold border transition ${
+                    travelMinutes === m ? 'bg-sky-600 text-white border-sky-600' : 'bg-stone-50 text-slate-700 border-stone-200'
+                  }`}
+                >
+                  {m === 0 ? 'No drive' : `${m} min drive`}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-bold text-stone-500 flex items-center gap-1">
+                <Car className="w-3.5 h-3.5" /> Driver:
+              </span>
+              {[{ id: '', name: 'Nobody set', emoji: '' }, ...members.filter((m) => m.role === 'parent')].map((m) => {
+                const on = (driverMemberId ?? '') === m.id;
+                return (
+                  <button
+                    key={m.id || 'none'}
+                    type="button"
+                    onClick={() => setDriverMemberId(m.id || null)}
+                    className={`h-10 min-h-[40px] px-3 rounded-xl text-xs font-bold border transition ${
+                      on ? 'bg-slate-800 text-white border-slate-800' : 'bg-stone-50 text-slate-700 border-stone-200'
+                    }`}
+                  >
+                    {m.emoji} {m.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+        </fieldset>
+
         <div className="flex items-center justify-between pt-2">
-          {onDelete ? (
+          {onDelete && !readOnly ? (
             <button
               type="button"
               onClick={onDelete}
@@ -976,13 +1100,25 @@ const EventModal: React.FC<EventModalProps> = ({
           )}
 
           <div className="flex items-center gap-2.5">
+            {draft.id && (
+              <button
+                type="button"
+                onClick={() => onCountdown(draft)}
+                title="Count down to this"
+                aria-label="Count down to this"
+                className="w-12 h-12 rounded-2xl bg-amber-50 hover:bg-amber-100 text-amber-600 flex items-center justify-center"
+              >
+                <Hourglass className="w-5 h-5" />
+              </button>
+            )}
             <button
               type="button"
               onClick={onClose}
               className="px-5 h-12 rounded-2xl bg-stone-100 hover:bg-stone-200 font-bold text-slate-700"
             >
-              Cancel
+              {readOnly ? 'Close' : 'Cancel'}
             </button>
+            {!readOnly && (
             <button
               type="submit"
               disabled={saving || !title.trim()}
@@ -990,6 +1126,7 @@ const EventModal: React.FC<EventModalProps> = ({
             >
               {saving ? 'Saving...' : 'Save Event'}
             </button>
+            )}
           </div>
         </div>
       </form>

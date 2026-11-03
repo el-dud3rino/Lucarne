@@ -9,7 +9,7 @@ import { isEventCategory } from '../../shared/eventCategories.js';
 
 export const eventsRouter = new Hono();
 
-function mapEventRow(row: Record<string, unknown>): CalendarEvent {
+export function mapEventRow(row: Record<string, unknown>): CalendarEvent {
   let memberIds: string[] = [];
   try {
     memberIds = JSON.parse(String(row.member_ids_json || '[]'));
@@ -39,8 +39,21 @@ function mapEventRow(row: Record<string, unknown>): CalendarEvent {
     recurrenceRule: (row.recurrence_rule as EventRecurrenceRule) || null,
     exceptionDates,
     category: isEventCategory(row.category) ? row.category : null,
+    travelMinutes: row.travel_minutes == null ? null : Number(row.travel_minutes),
+    driverMemberId: row.driver_member_id ? String(row.driver_member_id) : null,
+    icsFeedId: row.ics_feed_id ? String(row.ics_feed_id) : null,
   };
 }
+
+/** Travel time in whole minutes (0-600), or null when not set. */
+export function cleanTravelMinutes(v: unknown): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.min(n, 600);
+}
+
+const READ_ONLY_FEED_ERROR = 'This event comes from a subscribed calendar feed and is read-only. Change it at the source.';
 
 /** The same birthday often comes from two calendars (e.g. Family + Birthdays); show it once per day. */
 export function dedupeBirthdays(events: CalendarEvent[]): CalendarEvent[] {
@@ -54,44 +67,40 @@ export function dedupeBirthdays(events: CalendarEvent[]): CalendarEvent[] {
   });
 }
 
+/** Events overlapping [start, end] with recurring series expanded, sorted all-day first then by time. */
+export function getEventsInRange(start: string, end: string): CalendarEvent[] {
+  const rows = db
+    .prepare(
+      `SELECT * FROM events
+       WHERE deleted = 0
+         AND (
+           ((recurrence_rule IS NULL OR recurrence_rule = '') AND end_iso >= ? AND start_iso <= ?)
+           OR
+           (recurrence_rule IS NOT NULL AND recurrence_rule != '' AND start_iso <= ?)
+         )
+       ORDER BY all_day DESC, start_iso ASC`
+    )
+    .all(start, end, end) as Record<string, unknown>[];
+
+  const resultList: CalendarEvent[] = [];
+  for (const ev of rows.map(mapEventRow)) {
+    if (ev.recurrenceRule) resultList.push(...expandRecurringEvent(ev, start, end));
+    else resultList.push(ev);
+  }
+
+  resultList.sort((a, b) => {
+    const ad = (b.allDay ? 1 : 0) - (a.allDay ? 1 : 0);
+    if (ad !== 0) return ad;
+    return a.startIso.localeCompare(b.startIso);
+  });
+  return dedupeBirthdays(resultList);
+}
+
 eventsRouter.get('/', (c) => {
   const start = c.req.query('start');
   const end = c.req.query('end');
 
-  if (start && end) {
-    const rows = db
-      .prepare(
-        `SELECT * FROM events
-         WHERE deleted = 0
-           AND (
-             ((recurrence_rule IS NULL OR recurrence_rule = '') AND end_iso >= ? AND start_iso <= ?)
-             OR
-             (recurrence_rule IS NOT NULL AND recurrence_rule != '' AND start_iso <= ?)
-           )
-         ORDER BY all_day DESC, start_iso ASC`
-      )
-      .all(start, end, end) as Record<string, unknown>[];
-
-    const mappedEvents = rows.map(mapEventRow);
-    const resultList: CalendarEvent[] = [];
-
-    for (const ev of mappedEvents) {
-      if (ev.recurrenceRule) {
-        const instances = expandRecurringEvent(ev, start, end);
-        resultList.push(...instances);
-      } else {
-        resultList.push(ev);
-      }
-    }
-
-    resultList.sort((a, b) => {
-      const ad = (b.allDay ? 1 : 0) - (a.allDay ? 1 : 0);
-      if (ad !== 0) return ad;
-      return a.startIso.localeCompare(b.startIso);
-    });
-
-    return c.json(dedupeBirthdays(resultList));
-  }
+  if (start && end) return c.json(getEventsInRange(start, end));
 
   const rows = db
     .prepare('SELECT * FROM events WHERE deleted = 0 ORDER BY all_day DESC, start_iso ASC')
@@ -123,8 +132,8 @@ eventsRouter.post('/', async (c) => {
     `INSERT INTO events (
        id, title, description, location, start_iso, end_iso, all_day,
        member_ids_json, calendar_source_id, external_event_id, recurrence_rule,
-       exception_dates_json, deleted, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`
+       exception_dates_json, deleted, updated_at, travel_minutes, driver_member_id
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`
   ).run(
     id,
     (body.title || 'New Event').trim(),
@@ -138,7 +147,9 @@ eventsRouter.post('/', async (c) => {
     body.externalEventId || null,
     recurrenceRule,
     JSON.stringify(exceptionDates),
-    nowIso
+    nowIso,
+    cleanTravelMinutes(body.travelMinutes),
+    body.driverMemberId || null
   );
 
   if (calendarSourceId) {
@@ -197,6 +208,7 @@ eventsRouter.put('/:id', async (c) => {
   }
 
   if (!existing) return c.json({ error: 'Not found' }, 404);
+  if (existing.ics_feed_id) return c.json({ error: READ_ONLY_FEED_ERROR }, 403);
 
   const nowIso = new Date().toISOString();
   const title = (body.title ?? String(existing.title)).trim();
@@ -215,12 +227,22 @@ eventsRouter.put('/:id', async (c) => {
     body.exceptionDates !== undefined
       ? body.exceptionDates
       : (JSON.parse(String(existing.exception_dates_json || '[]')) as string[]);
+  const travelMinutes =
+    body.travelMinutes !== undefined
+      ? cleanTravelMinutes(body.travelMinutes)
+      : cleanTravelMinutes(existing.travel_minutes);
+  const driverMemberId =
+    body.driverMemberId !== undefined
+      ? body.driverMemberId || null
+      : existing.driver_member_id
+      ? String(existing.driver_member_id)
+      : null;
 
   db.prepare(
     `UPDATE events
      SET title = ?, description = ?, location = ?, start_iso = ?, end_iso = ?,
          all_day = ?, member_ids_json = ?, recurrence_rule = ?, exception_dates_json = ?,
-         updated_at = ?
+         updated_at = ?, travel_minutes = ?, driver_member_id = ?
      WHERE id = ?`
   ).run(
     title,
@@ -233,6 +255,8 @@ eventsRouter.put('/:id', async (c) => {
     recurrenceRule,
     JSON.stringify(exceptionDates),
     nowIso,
+    travelMinutes,
+    driverMemberId,
     targetId
   );
 
@@ -287,6 +311,7 @@ eventsRouter.delete('/:id', (c) => {
   }
 
   if (!existing) return c.json({ error: 'Not found' }, 404);
+  if (existing.ics_feed_id) return c.json({ error: READ_ONLY_FEED_ERROR }, 403);
 
   const scope = c.req.query('scope');
 
