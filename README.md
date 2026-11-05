@@ -338,6 +338,19 @@ sudo -u lucarne cp .env.example .env
 sudo -u lucarne nano .env        # add your Google client ID/secret (see above)
 ```
 
+**Or skip the build with a release download.** Each [GitHub release](https://github.com/el-dud3rino/Lucarne/releases) has a prebuilt `lucarne-vX.Y.Z.tar.gz`. It installs faster and needs no build tools:
+```bash
+sudo useradd --system --create-home --shell /usr/sbin/nologin lucarne
+curl -fsSL -o /tmp/lucarne.tar.gz https://github.com/el-dud3rino/Lucarne/releases/download/v0.1.0/lucarne-v0.1.0.tar.gz
+sudo mkdir -p /opt/lucarne
+sudo tar -xzf /tmp/lucarne.tar.gz -C /opt/lucarne --strip-components=1
+sudo chown -R lucarne:lucarne /opt/lucarne
+cd /opt/lucarne
+sudo -u lucarne npm ci --omit=dev
+sudo -u lucarne cp .env.example .env
+sudo -u lucarne nano .env
+```
+
 ### 3. Run the server as a service
 ```bash
 sudo cp deploy/lucarne.service /etc/systemd/system/
@@ -388,6 +401,7 @@ sudo -u lucarne npm ci
 sudo -u lucarne npm run build
 sudo systemctl restart lucarne
 ```
+If you installed from a release download, extract the new release over `/opt/lucarne` instead (same `tar` command as above, which leaves `data/` and `.env` alone), then run `sudo -u lucarne npm ci --omit=dev` and restart.
 Database changes are applied automatically on start.
 
 **Backups:** Lucarne snapshots the database every day into `data/backups/` and keeps the last 14. You can also take one with **Settings → Backup Now**. **Restore** restores any of them in place, with no restart; a safety copy of the current data is saved first, so a restore can be undone the same way. For an off-device copy, copy `data/backups/` (or the whole `data/` folder, which also holds downloaded photos and Keep credentials) to a USB stick or NAS now and then.
@@ -416,6 +430,10 @@ npm run import:meals -- ./meals.json
 npm run demo:seed -- --fresh   # builds ./demo-data (git-ignored); dates are relative to today
 npm run build && npm run demo:screenshots   # writes docs/screenshots/*.jpg
 DATA_DIR=./demo-data PORT=3002 npm start     # browse the demo yourself
+
+# Release: bump "version" in package.json, commit, then push a matching tag.
+# GitHub Actions tests, builds and attaches release/lucarne-vX.Y.Z.tar.gz (npm run package does the same locally).
+git tag v0.1.0 && git push origin v0.1.0
 ```
 
 Tests never touch real Google services or recipe sites. They run against local mock servers (Google OAuth/Calendar/Photos, Gemini, Keep, shared albums, recipe pages) and use a throwaway data folder, never your real `data/`.

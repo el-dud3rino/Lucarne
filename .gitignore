@@ -17,3 +17,6 @@ __pycache__/
 
 # Demo household for screenshots (npm run demo:seed)
 demo-data/
+
+# Release archives (npm run package)
+release/
