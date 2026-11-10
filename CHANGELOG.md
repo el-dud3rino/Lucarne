@@ -6,6 +6,31 @@ The release workflow stops if the tagged version has no section.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-10
+
+**Lucarne now runs in Docker.** Images are published for regular PCs (amd64) and the Raspberry Pi (arm64):
+
+```bash
+mkdir lucarne && cd lucarne
+curl -fsSL -O https://raw.githubusercontent.com/el-dud3rino/Lucarne/main/docker-compose.yml
+curl -fsSL -o .env https://raw.githubusercontent.com/el-dud3rino/Lucarne/main/.env.example
+nano .env                 # set TZ, for example TZ=America/Chicago
+docker compose up -d      # then open http://localhost:3001
+```
+
+Your data is kept in the `lucarne-data` volume. See [Run with Docker](https://github.com/el-dud3rino/Lucarne#run-with-docker) for updates, backups and what isn't supported in Docker yet (Google Keep sync).
+
+### Added
+- A Docker image (`ghcr.io/el-dud3rino/lucarne`) and `docker-compose.yml`, with a health check, a non-root user and a persistent data volume
+- Every change is now built and checked in Docker automatically before release
+
+### Changed
+- Release notes now come from this changelog
+- `.env.example` documents the `TZ` setting
+
+### Testers wanted
+Lucarne has mostly been tested on Windows so far. If you run it on a Raspberry Pi, in Docker, or on a touchscreen, please [open an issue](https://github.com/el-dud3rino/Lucarne/issues) or post in [Discussions](https://github.com/el-dud3rino/Lucarne/discussions), whether it works or it doesn't.
+
 ## [0.1.0] - 2026-11-05
 
 **Lucarne's first public release.** Lucarne is a self-hosted family hub for a wall touchscreen: a shared calendar, chores and rewards, meal planning, grocery lists and a photo frame. Everything runs on a Raspberry Pi or small PC in your home, your data is one SQLite file on that device, and there's no subscription.
