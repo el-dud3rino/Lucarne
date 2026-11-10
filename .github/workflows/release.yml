@@ -26,6 +26,17 @@ jobs:
             echo "Tag ${GITHUB_REF_NAME} does not match package.json version $v"; exit 1
           fi
 
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v head="## [$v]" '
+            /^## \[/ { if (found) exit; if (index($0, head) == 1) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/release-notes.md"
+          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/release-notes.md"; then
+            echo "CHANGELOG.md has no notes under '## [$v]'. Add them before tagging."; exit 1
+          fi
+
       - run: npm ci
       - run: npm run typecheck
       - run: npm test

@@ -62,6 +62,7 @@ Inspired by the Skylight Calendar, but self-hosted: your family's data lives in 
 - [How it works](#how-it-works)
 - [Hardware](#hardware)
 - [Quick start (try it on your computer)](#quick-start-try-it-on-your-computer)
+- [Run with Docker](#run-with-docker)
 - [Google Calendar & Photos setup](#google-calendar--photos-setup)
 - [Optional integrations](#optional-integrations)
 - [Configuration reference](#configuration-reference)
@@ -174,6 +175,29 @@ npm start
 Open **http://localhost:3001**. On first start Lucarne creates `data/lucarne.db` with a small demo family you can rename or delete in **Settings**.
 
 For development with hot reload, run `npm run dev` (web app on http://localhost:5173, API on :3001).
+
+## Run with Docker
+
+A Docker image is published for each release, for both regular PCs (amd64) and a Raspberry Pi (arm64).
+
+```bash
+mkdir lucarne && cd lucarne
+curl -fsSL -O https://raw.githubusercontent.com/el-dud3rino/Lucarne/main/docker-compose.yml
+curl -fsSL -o .env https://raw.githubusercontent.com/el-dud3rino/Lucarne/main/.env.example
+nano .env                 # set TZ (for example TZ=America/Chicago) and, later, your Google keys
+docker compose up -d
+```
+
+Open **http://localhost:3001**. Your data is kept in the `lucarne-data` Docker volume, so updating or recreating the container doesn't touch it.
+
+- **Update:** `docker compose pull && docker compose up -d`
+- **Build it yourself** instead of pulling the image: clone the repo, then `docker compose up -d --build`
+- **Back up off the device:** `docker compose cp lucarne:/app/data/backups ./backups` (Lucarne still takes its own daily backups inside the volume)
+- **Set `TZ`** to your time zone. Without it the container runs on UTC, and "today", chores and reminders will be off by hours.
+- **Linking Google accounts:** do it from a browser on the same computer as the container (http://localhost:3001), the same as without Docker. See [the note below](#google-calendar--photos-setup).
+- **Not supported in Docker yet:** the optional Google Keep sync, which needs a Python helper.
+
+The wall display itself (Chromium in kiosk mode) runs outside Docker. Follow steps 4–5 of the [Raspberry Pi guide](#installing-on-a-raspberry-pi-wall-display) and point it at http://localhost:3001.
 
 ## Google Calendar & Photos setup
 
@@ -431,8 +455,10 @@ npm run demo:seed -- --fresh   # builds ./demo-data (git-ignored); dates are rel
 npm run build && npm run demo:screenshots   # writes docs/screenshots/*.jpg
 DATA_DIR=./demo-data PORT=3002 npm start     # browse the demo yourself
 
-# Release: bump "version" in package.json, commit, then push a matching tag.
-# GitHub Actions tests, builds and attaches release/lucarne-vX.Y.Z.tar.gz (npm run package does the same locally).
+# Release: bump "version" in package.json, move the [Unreleased] notes in CHANGELOG.md
+# under a new "## [X.Y.Z] - date" heading, commit, then push a matching tag.
+# GitHub Actions tests, builds and attaches release/lucarne-vX.Y.Z.tar.gz (npm run package does the same locally),
+# using that CHANGELOG section as the release notes.
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
