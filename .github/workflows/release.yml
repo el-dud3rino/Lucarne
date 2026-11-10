@@ -51,4 +51,5 @@ jobs:
         run: |
           gh release create "${GITHUB_REF_NAME}" release/*.tar.gz \
             --title "Lucarne ${GITHUB_REF_NAME}" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
             --generate-notes
