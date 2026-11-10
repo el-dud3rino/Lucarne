@@ -1,0 +1,14 @@
+node_modules
+dist
+data
+demo-data
+release
+.env
+.git
+.github
+test-results
+playwright-report
+.agents
+keep-bridge/.venv
+**/__pycache__
+*.log

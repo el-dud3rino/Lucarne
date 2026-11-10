@@ -1,0 +1,21 @@
+# Lucarne with Docker Compose:  docker compose up -d   then open http://localhost:3001
+# Settings (Google keys, Gemini key, TZ) come from an optional .env file next to this one.
+services:
+  lucarne:
+    image: ghcr.io/el-dud3rino/lucarne:latest
+    build: .
+    container_name: lucarne
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      # Your local time zone, so "today", chores and reminders line up. Set TZ in .env.
+      TZ: ${TZ:-UTC}
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - lucarne-data:/app/data
+
+volumes:
+  lucarne-data:
