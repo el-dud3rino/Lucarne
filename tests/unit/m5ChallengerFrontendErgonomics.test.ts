@@ -368,10 +368,10 @@ test('Tier 5 Challenger: White-Box Static Audit of Viewport & Zero-Overflow Cons
   const appFile = path.resolve('src/client/App.tsx');
   const appContent = fs.readFileSync(appFile, 'utf-8');
 
-  // Verify App root container has overflow-hidden
+  // Verify App root fills the visible viewport (dvh, so phone browser bars don't hide the tab bar) without document overflow
   assert.ok(
-    appContent.includes('h-screen w-screen overflow-hidden'),
-    'App.tsx root must have h-screen w-screen overflow-hidden to prevent document overflow'
+    appContent.includes('h-dvh w-screen overflow-hidden'),
+    'App.tsx root must have h-dvh w-screen overflow-hidden to prevent document overflow'
   );
 
   // Verify main content container has min-w-0 min-h-0 overflow-hidden

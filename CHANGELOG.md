@@ -6,6 +6,18 @@ The release workflow stops if the tagged version has no section.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-13
+
+Fixes for using Lucarne on a phone.
+
+### Fixed
+- The bottom tab bar no longer hides behind the phone browser's address bar, so you can leave the calendar and switch tabs
+- Moving back or forward in the 5-Day and Week calendar views now shows which days are on screen (for example "Nov 18 – 22") instead of only the month
+- The calendar's day list jumps back to the first day when you change dates or views
+
+### Changed
+- The calendar's Today button is highlighted only when today is on screen
+
 ## [0.1.1] - 2026-11-10
 
 **Lucarne now runs in Docker.** Images are published for regular PCs (amd64) and the Raspberry Pi (arm64):
