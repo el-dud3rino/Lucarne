@@ -160,7 +160,7 @@ export const App: React.FC = () => {
   );
 
   return (
-    <div className="h-screen w-screen overflow-hidden flex flex-col md:flex-row bg-[#FAF8F5] text-slate-800">
+    <div className="h-dvh w-screen overflow-hidden flex flex-col md:flex-row bg-[#FAF8F5] text-slate-800">
       {/* Skylight-Inspired Left Navigation Rail (1080p Landscape Desktop/Kiosk) */}
       <aside className="hidden md:flex flex-col items-center justify-between w-[88px] shrink-0 bg-white border-r border-stone-200/90 py-5 select-none">
         <div className="flex flex-col items-center gap-2.5 w-full px-2">

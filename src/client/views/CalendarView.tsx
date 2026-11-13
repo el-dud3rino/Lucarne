@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Car,
@@ -224,6 +224,45 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 
   const today = new Date();
 
+  // Days currently on screen, for the toolbar heading and the "Today" button state.
+  const visibleRange = useMemo((): [Date, Date] => {
+    if (subView === 'schedule') return [anchorDate, addDays(anchorDate, 4)];
+    if (subView === 'week') {
+      const start = startOfWeek(anchorDate, 0);
+      return [start, addDays(start, 6)];
+    }
+    if (subView === 'people') return [anchorDate, anchorDate];
+    return [
+      new Date(anchorDate.getFullYear(), anchorDate.getMonth(), 1),
+      new Date(anchorDate.getFullYear(), anchorDate.getMonth() + 1, 0),
+    ];
+  }, [subView, anchorDate]);
+  const todayMidnight = new Date(today);
+  todayMidnight.setHours(0, 0, 0, 0);
+  const showingToday = todayMidnight >= visibleRange[0] && todayMidnight <= visibleRange[1];
+
+  const rangeLabel = (() => {
+    const [a, b] = visibleRange;
+    if (subView === 'month') return a.toLocaleDateString([], { month: 'long', year: 'numeric' });
+    if (subView === 'people') {
+      return a.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+    }
+    const sameMonth = a.getMonth() === b.getMonth();
+    const yearSuffix = a.getFullYear() !== today.getFullYear() || b.getFullYear() !== today.getFullYear()
+      ? `, ${b.getFullYear()}`
+      : '';
+    const end = sameMonth
+      ? String(b.getDate())
+      : b.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    return `${a.toLocaleDateString([], { month: 'short', day: 'numeric' })} – ${end}${yearSuffix}`;
+  })();
+
+  // Phones stack the days in a scroll list: jump back to the first day when the range changes.
+  const dayListRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    dayListRef.current?.scrollTo({ top: 0 });
+  }, [anchorDate, subView]);
+
   const renderAvatars = (list: FamilyMember[], max: number) => {
     if (list.length === 0) return null;
     const shown = list.length > max ? list.slice(0, max - 1) : list;
@@ -439,7 +478,12 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               now.setHours(0, 0, 0, 0);
               setAnchorDate(now);
             }}
-            className="px-4 h-11 rounded-2xl bg-white border border-stone-200 font-bold text-sm text-slate-700 hover:bg-stone-50 active:scale-95 shadow-2xs"
+            aria-pressed={showingToday}
+            className={`px-4 h-11 rounded-2xl border font-bold text-sm active:scale-95 shadow-2xs ${
+              showingToday
+                ? 'bg-sky-50 border-sky-200 text-sky-700'
+                : 'bg-white border-stone-200 text-slate-700 hover:bg-stone-50'
+            }`}
           >
             Today
           </button>
@@ -451,14 +495,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             <ChevronRight className="w-6 h-6" />
           </button>
 
-          <h2 className="ml-2 text-xl md:text-2xl font-extrabold text-slate-800 tracking-tight">
-            {subView === 'people'
-              ? anchorDate.toLocaleDateString([], {
-                  weekday: 'long',
-                  month: 'long',
-                  day: 'numeric',
-                })
-              : anchorDate.toLocaleDateString([], { month: 'long', year: 'numeric' })}
+          <h2
+            className="ml-1 sm:ml-2 text-lg sm:text-xl md:text-2xl font-extrabold text-slate-800 tracking-tight min-w-0 leading-tight"
+            aria-live="polite"
+          >
+            {rangeLabel}
           </h2>
           {subView === 'people' && (
             <div className="ml-3">
@@ -551,13 +592,13 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       {/* Main Calendar Grid Area */}
       <div className="flex-1 min-h-0">
         {subView === 'schedule' && (
-          <div className="h-full grid grid-cols-1 auto-rows-max md:auto-rows-auto md:grid-cols-2 lg:grid-cols-5 gap-3.5 overflow-y-auto md:overflow-hidden">
+          <div ref={dayListRef} className="h-full grid grid-cols-1 auto-rows-max md:auto-rows-auto md:grid-cols-2 lg:grid-cols-5 gap-3.5 overflow-y-auto md:overflow-hidden">
             {[0, 1, 2, 3, 4].map((offset) => renderDayColumn(addDays(anchorDate, offset), true))}
           </div>
         )}
 
         {subView === 'week' && (
-          <div className="h-full grid grid-cols-1 auto-rows-max md:auto-rows-auto md:grid-cols-7 gap-2.5 overflow-y-auto md:overflow-hidden">
+          <div ref={dayListRef} className="h-full grid grid-cols-1 auto-rows-max md:auto-rows-auto md:grid-cols-7 gap-2.5 overflow-y-auto md:overflow-hidden">
             {[0, 1, 2, 3, 4, 5, 6].map((offset) =>
               renderDayColumn(addDays(startOfWeek(anchorDate, 0), offset), false)
             )}
