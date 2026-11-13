@@ -269,19 +269,15 @@ test('Code Conformance Verification: src/client/views/CalendarView.tsx static AS
     'CalendarView.tsx must cap maxEvents to 2 in 6-week months'
   );
 
-  // Verify month grid container retains Playwright query selector compatibility
+  // Month view: one row per week (5 or 6), sized from the measured height so cells never cut an event
   assert.ok(
-    source.includes('className="flex-1 grid grid-cols-7 grid-rows-5'),
-    'CalendarView.tsx must retain grid-cols-7 grid-rows-5 class names for test selector compatibility'
+    source.includes('Array.from({ length: monthGridInfo.numWeeks }'),
+    'CalendarView.tsx must render one row per week (monthGridInfo.numWeeks)'
   );
+  assert.ok(source.includes('data-month-grid'), 'Month grid keeps a stable data-month-grid selector for tests');
+  assert.ok(source.includes('data-more-chip'), 'Days with more events than fit show a "+N more" chip');
   assert.ok(
-    source.includes('style={{ gridTemplateRows: `repeat(${monthGridInfo.numWeeks}, minmax(0, 1fr))` }}'),
-    'CalendarView.tsx must set gridTemplateRows dynamically via inline style to override 5-row constraint'
-  );
-
-  // Verify cell loop uses totalCells
-  assert.ok(
-    source.includes('Array.from({ length: monthGridInfo.totalCells })'),
-    'CalendarView.tsx must iterate over monthGridInfo.totalCells'
+    source.includes('Array.from({ length: monthGridInfo.totalCells }'),
+    'Phone month iterates over monthGridInfo.totalCells'
   );
 });

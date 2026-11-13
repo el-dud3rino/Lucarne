@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowRightLeft, Check, ListOrdered, Plus, ShoppingCart, Trash2, Sparkles, Settings2, X } from 'lucide-react';
+import { ArrowRightLeft, Check, ChevronDown, ListOrdered, Plus, ShoppingCart, Trash2, Sparkles, Settings2, X } from 'lucide-react';
 import { apiFetch } from '../lib/api.js';
 import { classifyGroceryItem, orderAisles } from '../../shared/groceryClassifier.js';
 import { AISLE_ICONS, AislePickerSheet, StoreOrderSheet } from '../components/AisleSheets.js';
@@ -37,6 +37,27 @@ export const ListsView: React.FC = () => {
   const [newListName, setNewListName] = useState('');
   const [newListGrocery, setNewListGrocery] = useState(true);
   const [editingList, setEditingList] = useState<TaskList | null>(null);
+  // Folded aisles and the checked-off pile are remembered on this device only.
+  const [collapsedAisles, setCollapsedAisles] = useState<Set<string>>(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem('lucarne.collapsedAisles') || '[]') as string[]);
+    } catch {
+      return new Set();
+    }
+  });
+  const toggleAisle = (cat: string) =>
+    setCollapsedAisles((prev) => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat);
+      else next.add(cat);
+      try {
+        localStorage.setItem('lucarne.collapsedAisles', JSON.stringify([...next]));
+      } catch {
+        /* private mode: fine, just not remembered */
+      }
+      return next;
+    });
+  const [showChecked, setShowChecked] = useState(false);
 
   const { data: lists = [] } = useQuery({
     queryKey: ['lists'],
@@ -505,11 +526,20 @@ export const ListsView: React.FC = () => {
                     key={group.category}
                     className="rounded-2xl border border-stone-200/80 bg-[#FAF8F5]/70 p-3.5 space-y-2"
                   >
-                    <div className="text-xs font-extrabold uppercase tracking-wider text-stone-500 flex items-center gap-1.5 px-1">
+                    <button
+                      type="button"
+                      onClick={() => toggleAisle(group.category)}
+                      aria-expanded={!collapsedAisles.has(group.category)}
+                      className="w-full min-h-[40px] -my-1 text-xs font-extrabold uppercase tracking-wider text-stone-500 flex items-center gap-1.5 px-1 text-left"
+                    >
                       <span>{AISLE_ICONS[group.category]}</span>
                       <span>{group.category}</span>
                       <span className="ml-auto text-stone-400">{group.items.length}</span>
-                    </div>
+                      <ChevronDown
+                        className={`w-4 h-4 text-stone-400 transition-transform ${collapsedAisles.has(group.category) ? '-rotate-90' : ''}`}
+                      />
+                    </button>
+                    {!collapsedAisles.has(group.category) && (
                     <div className="space-y-1.5">
                       {group.items.map((item) => (
                         <div
@@ -554,6 +584,7 @@ export const ListsView: React.FC = () => {
                         </div>
                       ))}
                     </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -586,10 +617,16 @@ export const ListsView: React.FC = () => {
             {/* Checked Items Section (Tap to re-add staple!) */}
             {checkedItems.length > 0 && (
               <div className="pt-3 border-t border-stone-100 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-extrabold uppercase tracking-wider text-stone-400">
-                    Completed / Checked ({checkedItems.length}) — tap item to uncheck
-                  </span>
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowChecked((v) => !v)}
+                    aria-expanded={showChecked}
+                    className="min-h-[40px] text-xs font-extrabold uppercase tracking-wider text-stone-400 flex items-center gap-1.5 text-left"
+                  >
+                    <ChevronDown className={`w-4 h-4 transition-transform ${showChecked ? '' : '-rotate-90'}`} />
+                    Completed ({checkedItems.length}){showChecked ? ' — tap to uncheck' : ''}
+                  </button>
                   <button
                     type="button"
                     onClick={() => clearCheckedMutation.mutate()}
@@ -599,6 +636,7 @@ export const ListsView: React.FC = () => {
                     Clear Checked
                   </button>
                 </div>
+                {showChecked && (
                 <div className="flex flex-wrap gap-2">
                   {checkedItems.map((item) => (
                     <button
@@ -613,6 +651,7 @@ export const ListsView: React.FC = () => {
                     </button>
                   ))}
                 </div>
+                )}
               </div>
             )}
           </div>

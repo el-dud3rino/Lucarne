@@ -2,8 +2,11 @@ import crypto from 'node:crypto';
 import { Hono } from 'hono';
 import { db } from '../db/connection.js';
 import { broadcastInvalidate } from '../sse.js';
-import type { Chore, ChoreCompletion, MemberStarStats } from '../../shared/types.js';
+import type { Chore, ChoreCompletion, FamilyMember, MemberStarStats } from '../../shared/types.js';
 import { localDateStr } from '../../shared/chores.js';
+import { awayOnDate, type AwayEntry } from '../../shared/away.js';
+import { getEventsInRange } from './events.js';
+import { getHomeAddress } from '../services/driveTimes.js';
 import { scheduleKeepSync } from '../services/keepSync.js';
 
 export const choresRouter = new Hono();
@@ -39,6 +42,24 @@ function mapCompletionRow(row: Record<string, unknown>): ChoreCompletion {
     starsEarned: Number(row.stars_earned),
     completedAt: String(row.completed_at),
   };
+}
+
+/** Who is away from home on a local date (vacations, trips), so their chores go up for grabs. */
+export function awayForDate(dateStr: string): AwayEntry[] {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const events = getEventsInRange(
+    new Date(y, m - 1, d, 0, 0, 0, 0).toISOString(),
+    new Date(y, m - 1, d, 23, 59, 59, 999).toISOString()
+  );
+  const members = db.prepare('SELECT id, role FROM family_members').all() as Array<Pick<FamilyMember, 'id' | 'role'>>;
+  return awayOnDate(events, dateStr, members, getHomeAddress());
+}
+
+/** Chore ids skipped on a local date. */
+export function skippedChoreIds(dateStr: string): string[] {
+  return (db.prepare('SELECT chore_id FROM chore_skips WHERE date_str = ?').all(dateStr) as Array<{ chore_id: string }>).map(
+    (r) => r.chore_id
+  );
 }
 
 choresRouter.get('/', (c) => {
@@ -101,7 +122,7 @@ choresRouter.get('/', (c) => {
     };
   });
 
-  return c.json({ chores, completions, stats });
+  return c.json({ chores, completions, stats, away: awayForDate(dateStr), skippedChoreIds: skippedChoreIds(dateStr) });
 });
 
 choresRouter.post('/', async (c) => {
@@ -221,6 +242,30 @@ choresRouter.post('/:id/toggle', async (c) => {
   broadcastInvalidate(['chores']);
   scheduleKeepSync();
   return c.json({ completed: true });
+});
+
+/** Skip (or un-skip) a chore for one day: no stars, and it doesn't count as missed. */
+choresRouter.post('/:id/skip', async (c) => {
+  const choreId = c.req.param('id');
+  const body = await c.req.json<{ dateStr?: string }>().catch(() => ({} as { dateStr?: string }));
+  const dateStr = body.dateStr && /^\d{4}-\d{2}-\d{2}$/.test(body.dateStr) ? body.dateStr : localDateStr();
+  const chore = db.prepare('SELECT id FROM chores WHERE id = ?').get(choreId);
+  if (!chore) return c.json({ error: 'Chore not found' }, 404);
+
+  const existing = db.prepare('SELECT 1 FROM chore_skips WHERE chore_id = ? AND date_str = ?').get(choreId, dateStr);
+  if (existing) {
+    db.prepare('DELETE FROM chore_skips WHERE chore_id = ? AND date_str = ?').run(choreId, dateStr);
+  } else {
+    db.prepare('DELETE FROM chore_completions WHERE chore_id = ? AND date_str = ?').run(choreId, dateStr);
+    db.prepare('INSERT INTO chore_skips (chore_id, date_str, created_at) VALUES (?, ?, ?)').run(
+      choreId,
+      dateStr,
+      new Date().toISOString()
+    );
+  }
+  broadcastInvalidate(['chores']);
+  scheduleKeepSync();
+  return c.json({ skipped: !existing });
 });
 
 choresRouter.delete('/:id', (c) => {

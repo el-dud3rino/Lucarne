@@ -56,3 +56,18 @@
 .animate-pop {
   animation: gentlePop 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }
+
+/* Paging a calendar/day view by swipe or arrows: the new page slides in from the side it came from. */
+@keyframes slideFromRight {
+  from { transform: translateX(28px); opacity: 0.4; }
+  to { transform: none; opacity: 1; }
+}
+@keyframes slideFromLeft {
+  from { transform: translateX(-28px); opacity: 0.4; }
+  to { transform: none; opacity: 1; }
+}
+.animate-page-left { animation: slideFromRight 180ms ease-out; }
+.animate-page-right { animation: slideFromLeft 180ms ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .animate-page-left, .animate-page-right { animation: none; }
+}

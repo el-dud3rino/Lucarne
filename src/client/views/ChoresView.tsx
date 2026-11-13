@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Award,
@@ -6,7 +6,9 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Plane,
   Plus,
+  SkipForward,
   Sparkles,
   Star,
   Trash2,
@@ -20,6 +22,8 @@ import { KidModeOverlay } from '../components/KidMode.js';
 import { Sheet } from '../components/Sheet.js';
 import { addDays, toDateStr } from '../lib/dates.js';
 import { choreAppliesToDate } from '../../shared/chores.js';
+import { effectiveChores, type AwayEntry, type EffectiveChore } from '../../shared/away.js';
+import { useIsPhone, useSwipePaging } from '../lib/gestures.js';
 
 const TIME_OF_DAY_ORDER: Record<ChoreTimeOfDay, number> = {
   morning: 0,
@@ -45,7 +49,12 @@ interface ChoresResponse {
   chores: Chore[];
   completions: ChoreCompletion[];
   stats: MemberStarStats[];
+  /** People away from home today (their chores go up for grabs) */
+  away?: AwayEntry[];
+  skippedChoreIds?: string[];
 }
+
+type Eff = EffectiveChore<Chore>;
 
 const TIME_LABELS: Record<ChoreTimeOfDay, string> = {
   morning: '🌅 Morning',
@@ -65,6 +74,16 @@ export const ChoresView: React.FC<ChoresViewProps> = ({ members, selectedMemberI
   const [board, setBoard] = useState<'chores' | 'routines' | 'habits'>('chores');
   const [kidPicker, setKidPicker] = useState(false);
   const [kidMember, setKidMember] = useState<FamilyMember | null>(null);
+  const isPhone = useIsPhone();
+  /** Phones show one person at a time ('shared' = Up for grabs) */
+  const [phoneMemberId, setPhoneMemberId] = useState<string | null>(null);
+  const [page, setPage] = useState<{ direction: 'left' | 'right' | null; key: number }>({ direction: null, key: 0 });
+  const stepDay = (dir: -1 | 1) => {
+    setPage((p) => ({ direction: dir === 1 ? 'left' : 'right', key: p.key + 1 }));
+    setActiveDate((d) => addDays(d, dir));
+  };
+  const swipeRef = useRef<HTMLDivElement>(null);
+  useSwipePaging(swipeRef, { onPrev: () => stepDay(-1), onNext: () => stepDay(1) });
 
   const individualMembers = useMemo(
     () => members.filter((m) => m.role !== 'family'),
@@ -88,6 +107,20 @@ export const ChoresView: React.FC<ChoresViewProps> = ({ members, selectedMemberI
   );
   const completions = data?.completions || [];
   const stats = data?.stats || [];
+  const away = data?.away || [];
+  const awayById = useMemo(() => new Map(away.map((a) => [a.memberId, a])), [away]);
+  // Away people's chores move to Up for grabs; skipped ones stay put but don't count.
+  const effective = useMemo(
+    () => effectiveChores(chores, away, data?.skippedChoreIds || []),
+    [chores, away, data?.skippedChoreIds]
+  );
+  const sortEff = (list: Eff[]) =>
+    [...list].sort(
+      (a, b) =>
+        Number(a.skipped) - Number(b.skipped) ||
+        (TIME_OF_DAY_ORDER[a.chore.timeOfDay] ?? 3) - (TIME_OF_DAY_ORDER[b.chore.timeOfDay] ?? 3) ||
+        a.chore.sortOrder - b.chore.sortOrder
+    );
 
   const completionByChore = useMemo(() => {
     const map = new Map<string, ChoreCompletion>();
@@ -170,25 +203,57 @@ export const ChoresView: React.FC<ChoresViewProps> = ({ members, selectedMemberI
     },
   });
 
-  const handleTapChore = (chore: Chore) => {
+  const skipMutation = useMutation({
+    mutationFn: async (choreId: string) =>
+      apiFetch(`/api/chores/${choreId}/skip`, { method: 'POST', body: JSON.stringify({ dateStr }) }),
+    onMutate: async (choreId) => {
+      await queryClient.cancelQueries({ queryKey });
+      const prev = queryClient.getQueryData<ChoresResponse>(queryKey);
+      if (prev) {
+        const skipped = new Set(prev.skippedChoreIds || []);
+        if (skipped.has(choreId)) skipped.delete(choreId);
+        else skipped.add(choreId);
+        queryClient.setQueryData<ChoresResponse>(queryKey, {
+          ...prev,
+          skippedChoreIds: [...skipped],
+          completions: prev.completions.filter((c) => c.choreId !== choreId),
+        });
+      }
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(queryKey, ctx.prev);
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['chores'] }),
+  });
+
+  const handleTapChore = (e: Eff) => {
+    const chore = e.chore;
+    if (e.skipped) {
+      skipMutation.mutate(chore.id);
+      return;
+    }
     const existing = completionByChore.get(chore.id);
     if (existing) {
       toggleMutation.mutate({ choreId: chore.id });
       return;
     }
-    if (!chore.assignedMemberId) {
+    // Up for grabs (shared, or moved there because its owner is away): ask who did it.
+    if (!e.ownerId) {
       setClaimingChore(chore);
       return;
     }
     toggleMutation.mutate({
       choreId: chore.id,
-      completedByMemberId: chore.assignedMemberId,
+      completedByMemberId: e.ownerId,
     });
   };
 
-  const renderChoreCard = (chore: Chore, accentColor: string) => {
+  const renderChoreCard = (e: Eff, accentColor: string) => {
+    const chore = e.chore;
     const comp = completionByChore.get(chore.id);
     const done = Boolean(comp);
+    const fromMember = e.reassignedFrom ? individualMembers.find((m) => m.id === e.reassignedFrom) : undefined;
     const completedMember = comp
       ? individualMembers.find((m) => m.id === comp.completedByMemberId)
       : undefined;
@@ -196,9 +261,12 @@ export const ChoresView: React.FC<ChoresViewProps> = ({ members, selectedMemberI
     return (
       <div
         key={chore.id}
-        onClick={() => handleTapChore(chore)}
+        onClick={() => handleTapChore(e)}
+        data-skipped={e.skipped || undefined}
         className={`group rounded-2xl border p-3.5 flex items-center gap-3 cursor-pointer transition select-none active:scale-[0.98] ${
-          done
+          e.skipped
+            ? 'bg-stone-50/60 border-dashed border-stone-300 opacity-60'
+            : done
             ? 'bg-stone-50/90 border-stone-200/80 opacity-65'
             : 'bg-white border-stone-200 shadow-2xs hover:border-stone-300'
         }`}
@@ -216,7 +284,7 @@ export const ChoresView: React.FC<ChoresViewProps> = ({ members, selectedMemberI
         <div className="flex-1 min-w-0">
           <div
             className={`font-bold text-sm md:text-[15px] leading-snug ${
-              done ? 'line-through text-stone-400' : 'text-slate-800'
+              done || e.skipped ? 'line-through text-stone-400' : 'text-slate-800'
             }`}
           >
             {chore.title}
@@ -227,13 +295,34 @@ export const ChoresView: React.FC<ChoresViewProps> = ({ members, selectedMemberI
               <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
               {chore.stars}
             </span>
-            {completedMember && !chore.assignedMemberId && (
+            {completedMember && !e.ownerId && (
               <span className="px-1.5 py-0.5 rounded-md bg-stone-200/70 text-slate-700 font-bold text-[11px]">
                 Done by {completedMember.name}
               </span>
             )}
+            {fromMember && !done && (
+              <span className="px-1.5 py-0.5 rounded-md bg-sky-100 text-sky-800 font-bold text-[11px] whitespace-nowrap" title={`${fromMember.name} is away`}>
+                ✈️ {fromMember.name}
+              </span>
+            )}
+            {e.skipped && <span className="font-bold text-stone-500">Skipped · tap to undo</span>}
           </div>
         </div>
+
+        {!done && !e.skipped && (
+          <button
+            type="button"
+            onClick={(ev) => {
+              ev.stopPropagation();
+              skipMutation.mutate(chore.id);
+            }}
+            title="Skip today (no stars, not counted as missed)"
+            aria-label={`Skip ${chore.title} today`}
+            className="h-10 min-h-[40px] min-w-[40px] px-2 rounded-lg text-stone-400 hover:text-slate-700 hover:bg-stone-100 opacity-70 md:opacity-0 md:group-hover:opacity-100 transition flex items-center justify-center"
+          >
+            <SkipForward className="w-4 h-4" />
+          </button>
+        )}
 
         <button
           type="button"
@@ -249,17 +338,12 @@ export const ChoresView: React.FC<ChoresViewProps> = ({ members, selectedMemberI
     );
   };
 
-  const sharedChores = useMemo(
-    () =>
-      chores
-        .filter((c) => !c.assignedMemberId)
-        .sort(
-          (a, b) =>
-            (TIME_OF_DAY_ORDER[a.timeOfDay] ?? 3) - (TIME_OF_DAY_ORDER[b.timeOfDay] ?? 3) ||
-            a.sortOrder - b.sortOrder
-        ),
-    [chores]
-  );
+  const sharedChores = useMemo(() => sortEff(effective.filter((e) => !e.ownerId)), [effective]);
+  const counted = (list: Eff[]) => list.filter((e) => !e.skipped);
+  const phoneSelected =
+    phoneMemberId === 'shared' || visibleMembers.some((m) => m.id === phoneMemberId)
+      ? phoneMemberId
+      : visibleMembers[0]?.id ?? 'shared';
 
   return (
     <div className="h-full flex flex-col gap-3">
@@ -268,7 +352,8 @@ export const ChoresView: React.FC<ChoresViewProps> = ({ members, selectedMemberI
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => setActiveDate((d) => addDays(d, -1))}
+            onClick={() => stepDay(-1)}
+            aria-label="Previous day"
             className="w-11 h-11 rounded-2xl bg-white border border-stone-200 flex items-center justify-center text-slate-700 active:scale-95"
           >
             <ChevronLeft className="w-6 h-6" />
@@ -282,14 +367,15 @@ export const ChoresView: React.FC<ChoresViewProps> = ({ members, selectedMemberI
           </button>
           <button
             type="button"
-            onClick={() => setActiveDate((d) => addDays(d, 1))}
+            onClick={() => stepDay(1)}
+            aria-label="Next day"
             className="w-11 h-11 rounded-2xl bg-white border border-stone-200 flex items-center justify-center text-slate-700 active:scale-95"
           >
             <ChevronRight className="w-6 h-6" />
           </button>
-          <h2 className="ml-2 text-xl md:text-2xl font-extrabold text-slate-800">
+          <h2 className="ml-1 md:ml-2 text-lg md:text-2xl font-extrabold text-slate-800 truncate">
             {activeDate.toLocaleDateString([], {
-              weekday: 'long',
+              weekday: isPhone ? 'short' : 'long',
               month: 'short',
               day: 'numeric',
             })}
@@ -362,34 +448,95 @@ export const ChoresView: React.FC<ChoresViewProps> = ({ members, selectedMemberI
         </div>
       </div>
 
+      {/* Swipe left/right to change the day */}
+      <div ref={swipeRef} className="flex-1 min-h-0 flex flex-col touch-pan-y">
+      <div
+        key={page.key}
+        className={`flex-1 min-h-0 flex flex-col gap-3 ${page.direction === 'left' ? 'animate-page-left' : page.direction === 'right' ? 'animate-page-right' : ''}`}
+      >
       {board !== 'chores' && (
         <RoutinesBoard mode={board} members={visibleMembers} allMembers={members} dateStr={dateStr} />
       )}
 
-      {/* Person Columns + Shared Household Column */}
+      {/* Phones: pick one person at a time */}
+      {board === 'chores' && isPhone && (
+        <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 shrink-0" data-no-swipe role="tablist" aria-label="Whose chores">
+          {visibleMembers.map((m) => {
+            const mine = counted(effective.filter((e) => e.ownerId === m.id));
+            const doneN = mine.filter((e) => completionByChore.has(e.chore.id)).length;
+            const sel = phoneSelected === m.id;
+            const isAway = awayById.has(m.id);
+            return (
+              <button
+                key={m.id}
+                type="button"
+                role="tab"
+                aria-selected={sel}
+                onClick={() => setPhoneMemberId(m.id)}
+                className={`shrink-0 min-w-[64px] min-h-[64px] px-2 py-1.5 rounded-2xl flex flex-col items-center gap-1 transition ${
+                  sel ? 'bg-white shadow-xs ring-2' : 'opacity-80'
+                }`}
+                style={sel ? ({ ['--tw-ring-color' as string]: m.colorAccent } as React.CSSProperties) : undefined}
+              >
+                <span
+                  style={{ backgroundColor: m.colorAccent }}
+                  className="relative w-10 h-10 rounded-full text-white text-lg flex items-center justify-center"
+                >
+                  {m.emoji}
+                  {isAway && (
+                    <span className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-white text-sky-600 flex items-center justify-center shadow">
+                      <Plane className="w-3 h-3" />
+                    </span>
+                  )}
+                </span>
+                <span className="text-[11px] font-bold text-slate-700 leading-none">
+                  {isAway ? 'Away' : mine.length ? `${doneN}/${mine.length}` : '—'}
+                </span>
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={phoneSelected === 'shared'}
+            onClick={() => setPhoneMemberId('shared')}
+            className={`shrink-0 min-w-[64px] min-h-[64px] px-2 py-1.5 rounded-2xl flex flex-col items-center gap-1 transition ${
+              phoneSelected === 'shared' ? 'bg-white shadow-xs ring-2 ring-purple-500' : 'opacity-80'
+            }`}
+          >
+            <span className="w-10 h-10 rounded-full bg-purple-600 text-white flex items-center justify-center">
+              <Sparkles className="w-5 h-5" />
+            </span>
+            <span className="text-[11px] font-bold text-slate-700 leading-none">
+              {counted(sharedChores).filter((e) => !completionByChore.has(e.chore.id)).length} open
+            </span>
+          </button>
+        </div>
+      )}
+
+      {/* Person Columns + Up-for-grabs column */}
       {board === 'chores' && (
       <div
         className="flex-1 min-h-0 grid gap-3.5 overflow-x-auto pb-1"
         style={{
-          gridTemplateColumns: `repeat(${visibleMembers.length + 1}, minmax(265px, 1fr))`,
+          gridTemplateColumns: isPhone ? 'minmax(0, 1fr)' : `repeat(${visibleMembers.length + 1}, minmax(265px, 1fr))`,
         }}
       >
-        {visibleMembers.map((member) => {
-          const mChores = chores
-            .filter((c) => c.assignedMemberId === member.id)
-            .sort(
-              (a, b) =>
-                (TIME_OF_DAY_ORDER[a.timeOfDay] ?? 3) - (TIME_OF_DAY_ORDER[b.timeOfDay] ?? 3) ||
-                a.sortOrder - b.sortOrder
-            );
-          const doneCount = mChores.filter((c) => completionByChore.has(c.id)).length;
+        {visibleMembers
+          .filter((m) => !isPhone || phoneSelected === m.id)
+          .map((member) => {
+          const mList = sortEff(effective.filter((e) => e.ownerId === member.id));
+          const mCounted = counted(mList);
+          const doneCount = mCounted.filter((e) => completionByChore.has(e.chore.id)).length;
           const mStat = stats.find((s) => s.memberId === member.id);
-          const pct = mChores.length > 0 ? Math.round((doneCount / mChores.length) * 100) : 100;
+          const pct = mCounted.length > 0 ? Math.round((doneCount / mCounted.length) * 100) : 100;
+          const awayInfo = awayById.get(member.id);
+          const movedCount = effective.filter((e) => e.reassignedFrom === member.id).length;
 
           return (
             <div
               key={member.id}
-              className="flex flex-col h-full rounded-2xl bg-white border border-stone-200/90 shadow-2xs overflow-hidden"
+              className="flex flex-col h-full min-h-0 rounded-2xl bg-white border border-stone-200/90 shadow-2xs overflow-hidden"
             >
               <div
                 style={{ backgroundColor: member.colorBg, color: member.colorText }}
@@ -406,23 +553,38 @@ export const ChoresView: React.FC<ChoresViewProps> = ({ members, selectedMemberI
                     <div>
                       <div className="font-extrabold text-lg leading-tight">{member.name}</div>
                       <div className="text-xs font-bold opacity-80">
-                        {doneCount}/{mChores.length} done · ⭐ {mStat?.weekStars ?? 0} this wk
+                        {awayInfo
+                          ? `✈️ Away · ${awayInfo.eventTitle}`
+                          : `${doneCount}/${mCounted.length} done · ⭐ ${mStat?.weekStars ?? 0} this wk`}
                       </div>
                     </div>
                   </div>
-                  <span className="text-sm font-extrabold">{pct}%</span>
+                  {!awayInfo && <span className="text-sm font-extrabold">{pct}%</span>}
                 </div>
-                <div className="mt-2.5 h-2 rounded-full bg-white/70 overflow-hidden">
-                  <div
-                    style={{ width: `${pct}%`, backgroundColor: member.colorAccent }}
-                    className="h-full rounded-full transition-all duration-300"
-                  />
-                </div>
+                {!awayInfo && (
+                  <div className="mt-2.5 h-2 rounded-full bg-white/70 overflow-hidden">
+                    <div
+                      style={{ width: `${pct}%`, backgroundColor: member.colorAccent }}
+                      className="h-full rounded-full transition-all duration-300"
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
-                {mChores.map((c) => renderChoreCard(c, member.colorAccent))}
-                {mChores.length === 0 && (
+                {mList.map((e) => renderChoreCard(e, member.colorAccent))}
+                {awayInfo && (
+                  <div className="py-8 px-3 flex flex-col items-center justify-center text-center gap-2 text-stone-400">
+                    <Plane className="w-8 h-8 text-sky-400" />
+                    <div className="text-sm font-bold text-slate-600">{member.name} is away today</div>
+                    <div className="text-xs font-medium">
+                      {movedCount > 0
+                        ? `${movedCount} chore${movedCount === 1 ? '' : 's'} moved to Up for grabs — anyone can do them for the stars.`
+                        : 'No chores to cover.'}
+                    </div>
+                  </div>
+                )}
+                {!awayInfo && mList.length === 0 && (
                   <div className="h-28 flex items-center justify-center text-sm text-stone-300 font-medium">
                     All clear!
                   </div>
@@ -432,24 +594,25 @@ export const ChoresView: React.FC<ChoresViewProps> = ({ members, selectedMemberI
           );
         })}
 
-        {/* Shared / Up-for-Grabs Household Column */}
-        <div className="flex flex-col h-full rounded-2xl bg-white border border-stone-200/90 shadow-2xs overflow-hidden">
+        {/* Up for grabs: shared chores plus chores of anyone away */}
+        {(!isPhone || phoneSelected === 'shared') && (
+        <div className="flex flex-col h-full min-h-0 rounded-2xl bg-white border border-stone-200/90 shadow-2xs overflow-hidden">
           <div className="px-4 py-3.5 bg-purple-50 text-purple-950 border-b border-purple-100">
             <div className="flex items-center gap-2.5">
               <span className="w-10 h-10 rounded-full bg-purple-600 text-white text-lg flex items-center justify-center shadow-2xs">
                 <Sparkles className="w-5 h-5" />
               </span>
               <div>
-                <div className="font-extrabold text-lg leading-tight">Shared / Anyone</div>
+                <div className="font-extrabold text-lg leading-tight">Up for grabs</div>
                 <div className="text-xs font-bold opacity-75">
-                  Tap to claim stars when completed
+                  {away.length > 0 ? 'Shared chores + chores of anyone away' : 'Tap to claim stars when completed'}
                 </div>
               </div>
             </div>
           </div>
 
           <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
-            {sharedChores.map((c) => renderChoreCard(c, '#9333EA'))}
+            {sharedChores.map((e) => renderChoreCard(e, '#9333EA'))}
             {sharedChores.length === 0 && (
               <div className="h-28 flex items-center justify-center text-sm text-stone-300 font-medium">
                 No shared chores
@@ -457,9 +620,12 @@ export const ChoresView: React.FC<ChoresViewProps> = ({ members, selectedMemberI
             )}
           </div>
         </div>
+        )}
       </div>
 
       )}
+      </div>
+      </div>
 
       {/* "Who Did It?" Quick Picker for Shared Chores */}
       {claimingChore && (
@@ -478,7 +644,7 @@ export const ChoresView: React.FC<ChoresViewProps> = ({ members, selectedMemberI
               </button>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              {individualMembers.map((m) => (
+              {individualMembers.filter((m) => !awayById.has(m.id)).map((m) => (
                 <button
                   key={m.id}
                   type="button"

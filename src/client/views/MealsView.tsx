@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ChefHat,
@@ -31,6 +31,8 @@ import type {
   RecipeIngredient,
 } from '../../shared/types.js';
 
+import { useIsPhone, useSwipePaging } from '../lib/gestures.js';
+
 interface MealsViewProps {
   settings: AppSettings;
 }
@@ -52,7 +54,23 @@ const TAG_FILTERS = [
 export const MealsView: React.FC<MealsViewProps> = ({ settings }) => {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<'planner' | 'recipes'>('planner');
-  const [weekStart, setWeekStart] = useState<Date>(() => startOfWeek(new Date(), 0));
+  const [weekStart, setWeekStartRaw] = useState<Date>(() => startOfWeek(new Date(), 0));
+  const isPhone = useIsPhone();
+  const [page, setPage] = useState<{ direction: 'left' | 'right' | null; key: number }>({ direction: null, key: 0 });
+  /** Move the plan by weeks with a slide in the matching direction (arrows and swipes). */
+  const setWeekStart = (next: Date | ((d: Date) => Date)) => {
+    setWeekStartRaw((cur) => {
+      const n = typeof next === 'function' ? next(cur) : next;
+      if (n.getTime() !== cur.getTime()) setPage((p) => ({ direction: n > cur ? 'left' : 'right', key: p.key + 1 }));
+      return n;
+    });
+  };
+  const planSwipeRef = useRef<HTMLDivElement>(null);
+  useSwipePaging(planSwipeRef, {
+    onPrev: () => setWeekStart((d) => addDays(d, -7)),
+    onNext: () => setWeekStart((d) => addDays(d, 7)),
+    enabled: tab === 'planner',
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string>('All');
 
@@ -270,8 +288,93 @@ export const MealsView: React.FC<MealsViewProps> = ({ settings }) => {
         />
       )}
 
-      {/* TAB 1: Weekly Meal Planner Grid */}
+      {/* TAB 1: Weekly Meal Planner (swipe left/right for other weeks) */}
       {tab === 'planner' && (
+        <div ref={planSwipeRef} className="flex-1 min-h-0 flex flex-col touch-pan-y">
+        <div
+          key={page.key}
+          className={`flex-1 min-h-0 flex flex-col ${page.direction === 'left' ? 'animate-page-left' : page.direction === 'right' ? 'animate-page-right' : ''}`}
+        >
+        {isPhone ? (
+          <div
+            className="flex-1 min-h-0 overflow-y-auto pb-6"
+            data-testid="meals-phone-list"
+            ref={(el) => {
+              // Open on today when this week includes it.
+              if (el && !el.dataset.scrolled) {
+                el.dataset.scrolled = '1';
+                el.querySelector<HTMLElement>('[data-today]')?.scrollIntoView({ block: 'start' });
+              }
+            }}
+          >
+            {Array.from({ length: 7 }).map((_, idx) => {
+              const day = addDays(weekStart, idx);
+              const dStr = toDateStr(day);
+              const isToday = dStr === toDateStr(new Date());
+              return (
+                <div key={dStr} data-today={isToday || undefined} className="flex gap-3 py-2.5 border-b border-stone-200/70 last:border-b-0 scroll-mt-2">
+                  <div className="w-12 shrink-0 flex flex-col items-center pt-0.5">
+                    <span className={`text-[11px] font-bold uppercase tracking-wider ${isToday ? 'text-amber-600' : 'text-stone-400'}`}>
+                      {day.toLocaleDateString([], { weekday: 'short' })}
+                    </span>
+                    <span
+                      className={`w-9 h-9 rounded-full flex items-center justify-center text-lg font-extrabold ${
+                        isToday ? 'bg-amber-500 text-white' : 'text-slate-800'
+                      }`}
+                    >
+                      {day.getDate()}
+                    </span>
+                  </div>
+                  <div className="flex-1 min-w-0 space-y-1.5">
+                    {SLOTS.map((slot) => {
+                      const entry = planMap.get(`${dStr}:${slot.key}`);
+                      const title = entry?.recipe?.title || entry?.customTitle || '';
+                      return (
+                        <div
+                          key={slot.key}
+                          className={`min-h-[44px] rounded-xl border flex items-center gap-2 pl-3 pr-1 ${
+                            title ? 'bg-amber-50/70 border-amber-200/80' : 'bg-stone-50/60 border-dashed border-stone-200'
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() =>
+                              entry?.recipe ? setCookRecipe(entry.recipe) : setAssignTarget({ dateStr: dStr, slot: slot.key })
+                            }
+                            className="flex-1 min-w-0 min-h-[44px] flex items-center gap-2 text-left"
+                          >
+                            <span aria-hidden className="text-base">{slot.emoji}</span>
+                            {title ? (
+                              <span className="min-w-0">
+                                <span className="block text-sm font-bold text-slate-800 truncate">{title}</span>
+                                <span className="block text-[11px] font-semibold text-stone-400">
+                                  {slot.label}
+                                  {entry?.recipe ? ' · tap to cook' : ''}
+                                </span>
+                              </span>
+                            ) : (
+                              <span className="text-sm font-semibold text-stone-400">+ {slot.label}</span>
+                            )}
+                          </button>
+                          {entry && (
+                            <button
+                              type="button"
+                              onClick={() => removePlanMutation.mutate(entry.id)}
+                              aria-label={`Clear ${slot.label.toLowerCase()}`}
+                              className="w-10 h-10 min-w-[40px] min-h-[40px] flex items-center justify-center text-stone-400 hover:text-rose-500 rounded-full shrink-0"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
         <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-7 gap-2.5 overflow-y-auto md:overflow-hidden">
           {Array.from({ length: 7 }).map((_, idx) => {
             const day = addDays(weekStart, idx);
@@ -372,6 +475,9 @@ export const MealsView: React.FC<MealsViewProps> = ({ settings }) => {
               </div>
             );
           })}
+        </div>
+        )}
+        </div>
         </div>
       )}
 

@@ -4,6 +4,8 @@ import { getEventsInRange } from './events.js';
 import { listUpcomingCountdowns } from './countdowns.js';
 import { loadHabits, loadRoutines, routineAppliesToDate } from './routines.js';
 import { choreAppliesToDate, localDateStr } from '../../shared/chores.js';
+import { effectiveChores } from '../../shared/away.js';
+import { awayForDate, skippedChoreIds } from './chores.js';
 import { extractEventsWithGemini } from '../services/magicImport.js';
 import type { Chore, TodaySummary } from '../../shared/types.js';
 
@@ -39,7 +41,7 @@ export function buildTodaySummary(dateStr: string, memberId?: string): TodaySumm
   const done = new Set(
     (db.prepare('SELECT chore_id FROM chore_completions WHERE date_str = ?').all(dateStr) as Array<{ chore_id: string }>).map((r) => r.chore_id)
   );
-  const chores = choreRows
+  const dueChores = choreRows
     .map((r) => ({
       id: String(r.id),
       title: String(r.title),
@@ -58,13 +60,18 @@ export function buildTodaySummary(dateStr: string, memberId?: string): TodaySumm
       stars: Number(r.stars || 1),
       done: done.has(String(r.id)),
     }))
-    .filter((c) => choreAppliesToDate(c, jsDay, dateStr))
-    .filter((c) => !memberId || c.assignedMemberId === memberId || c.assignedMemberId === null);
+    .filter((c) => choreAppliesToDate(c, jsDay, dateStr));
+
+  // Away people's chores go up for grabs; skipped chores drop out for the day.
+  const effective = effectiveChores(dueChores, awayForDate(dateStr), skippedChoreIds(dateStr)).filter((e) => !e.skipped);
+  const chores = effective
+    .filter((e) => !memberId || e.ownerId === memberId || e.ownerId === null)
+    .map((e) => ({ ...e.chore, assignedMemberId: e.ownerId }));
 
   const members = db.prepare("SELECT id FROM family_members WHERE role != 'family' ORDER BY sort_order").all() as Array<{ id: string }>;
   const choresLeft = members.map(({ id }) => {
-    const mine = chores.filter((c) => c.assignedMemberId === id);
-    return { memberId: id, left: mine.filter((c) => !c.done).length, total: mine.length };
+    const mine = effective.filter((e) => e.ownerId === id);
+    return { memberId: id, left: mine.filter((e) => !e.chore.done).length, total: mine.length };
   });
 
   const routines = loadRoutines(dateStr, memberId).filter((r) => routineAppliesToDate(r, dateStr));
@@ -75,7 +82,7 @@ export function buildTodaySummary(dateStr: string, memberId?: string): TodaySumm
     dinner: dinnerTitle ? { title: dinnerTitle, imageUrl: dinnerRow?.image_url ?? null } : null,
     chores: memberId ? chores : [],
     choresLeft,
-    sharedChoresLeft: chores.filter((c) => c.assignedMemberId === null && !c.done).length,
+    sharedChoresLeft: effective.filter((e) => e.ownerId === null && !e.chore.done).length,
     routines,
     habits: memberId ? loadHabits(dateStr, memberId) : [],
     countdowns: listUpcomingCountdowns(dateStr).slice(0, 6),

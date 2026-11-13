@@ -8,6 +8,7 @@ import { eventLook, memberSwatch } from '../lib/eventColors.js';
 import { useNow, useToday } from '../components/TodayBar.js';
 import { CATEGORY_STYLES } from '../../shared/eventCategories.js';
 import { choreAppliesToDate } from '../../shared/chores.js';
+import { effectiveChores, type AwayEntry } from '../../shared/away.js';
 import type {
   AppSettings,
   CalendarEvent,
@@ -40,7 +41,7 @@ export const HomeView: React.FC<HomeViewProps> = ({ members, settings, onOpenTab
   return (
     <div className="h-full overflow-y-auto md:overflow-hidden flex flex-col md:grid md:grid-cols-2 gap-3.5 md:gap-5" data-testid="home-view">
       <TodayColumn members={members} settings={settings} now={now} dateStr={dateStr} onOpenTab={onOpenTab} />
-      <div className="flex flex-col gap-3.5 md:gap-5 md:min-h-0 md:grid md:grid-rows-[minmax(0,1.1fr)_minmax(0,1fr)]">
+      <div className="flex flex-col gap-3.5 md:gap-5 max-md:shrink-0 md:min-h-0 md:grid md:grid-rows-[minmax(0,1.1fr)_minmax(0,1fr)]">
         <ChoresStrip members={members} dateStr={dateStr} onOpenTab={onOpenTab} />
         <ListsStrip onOpenTab={onOpenTab} />
       </div>
@@ -50,7 +51,7 @@ export const HomeView: React.FC<HomeViewProps> = ({ members, settings, onOpenTab
 
 /* ------------------------------------------------------------------ helpers */
 
-const panel = 'rounded-3xl bg-white border border-stone-200/90 shadow-2xs flex flex-col md:min-h-0 overflow-hidden';
+const panel = 'rounded-3xl bg-white border border-stone-200/90 shadow-2xs flex flex-col max-md:shrink-0 md:min-h-0 overflow-hidden';
 const openBtn =
   'h-10 min-h-[40px] min-w-[40px] px-3 rounded-xl bg-stone-100 hover:bg-stone-200 text-slate-700 text-xs font-bold flex items-center gap-1 shrink-0 active:scale-95 transition';
 
@@ -251,6 +252,8 @@ interface ChoresResponse {
   chores: Chore[];
   completions: ChoreCompletion[];
   stats: MemberStarStats[];
+  away?: AwayEntry[];
+  skippedChoreIds?: string[];
 }
 
 const TIME_ORDER: Record<ChoreTimeOfDay, number> = { morning: 0, afternoon: 1, evening: 2, anytime: 3 };
@@ -268,10 +271,16 @@ const ChoresStrip: React.FC<{ members: FamilyMember[]; dateStr: string; onOpenTa
   }, [dateStr]);
   const chores = useMemo(
     () =>
-      (data?.chores || [])
-        .filter((c) => c.active !== false && choreAppliesToDate(c, day, dateStr))
+      // Away people's chores show as up for grabs; skipped chores are hidden for the day.
+      effectiveChores(
+        (data?.chores || []).filter((c) => c.active !== false && choreAppliesToDate(c, day, dateStr)),
+        data?.away || [],
+        data?.skippedChoreIds || []
+      )
+        .filter((e) => !e.skipped)
+        .map((e) => ({ ...e.chore, assignedMemberId: e.ownerId }))
         .sort((a, b) => TIME_ORDER[a.timeOfDay] - TIME_ORDER[b.timeOfDay] || a.sortOrder - b.sortOrder),
-    [data?.chores, day, dateStr]
+    [data?.chores, data?.away, data?.skippedChoreIds, day, dateStr]
   );
   const doneBy = useMemo(() => new Map((data?.completions || []).map((c) => [c.choreId, c])), [data?.completions]);
   const starsToday = useMemo(() => new Map((data?.stats || []).map((s) => [s.memberId, s.todayStars])), [data?.stats]);
