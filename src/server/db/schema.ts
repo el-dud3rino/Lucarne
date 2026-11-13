@@ -500,6 +500,25 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 12,
+    name: '012_away_and_chore_skips',
+    up: (d: DatabaseSync) => {
+      // Per-event "away from home" override (null = automatic) and per-day chore skips.
+      const cols = d.prepare('PRAGMA table_info(events)').all() as Array<{ name: string }>;
+      if (!cols.some((c) => c.name === 'away_mode')) {
+        d.exec('ALTER TABLE events ADD COLUMN away_mode TEXT DEFAULT NULL');
+      }
+      d.exec(`
+        CREATE TABLE IF NOT EXISTS chore_skips (
+          chore_id TEXT NOT NULL REFERENCES chores(id) ON DELETE CASCADE,
+          date_str TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          PRIMARY KEY (chore_id, date_str)
+        );
+      `);
+    },
+  },
 ];
 
 export function initSchema(): void {

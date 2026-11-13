@@ -5,6 +5,7 @@ import { broadcastInvalidate } from '../sse.js';
 import { flushOutboxMutations } from '../services/google.js';
 import { expandRecurringEvent } from '../services/recurrence.js';
 import type { CalendarEvent, EventRecurrenceRule } from '../../shared/types.js';
+import type { AwayMode } from '../../shared/away.js';
 import { isEventCategory } from '../../shared/eventCategories.js';
 import { effectiveTravelMinutes } from '../../shared/driveTime.js';
 import { autoDriveMinutes, scheduleDriveRefresh } from '../services/driveTimes.js';
@@ -44,6 +45,7 @@ export function mapEventRow(row: Record<string, unknown>): CalendarEvent {
     ...travelFields(row),
     driverMemberId: row.driver_member_id ? String(row.driver_member_id) : null,
     icsFeedId: row.ics_feed_id ? String(row.ics_feed_id) : null,
+    awayMode: cleanAwayMode(row.away_mode),
   };
 }
 
@@ -51,6 +53,10 @@ function travelFields(row: Record<string, unknown>) {
   const manual = row.travel_minutes == null ? null : Number(row.travel_minutes);
   const auto = row.all_day ? null : autoDriveMinutes(row.location ? String(row.location) : '');
   return { travelMinutes: effectiveTravelMinutes(manual, auto), travelManualMinutes: manual, travelAutoMinutes: auto };
+}
+
+export function cleanAwayMode(v: unknown): AwayMode {
+  return v === 'away' || v === 'home' ? v : null;
 }
 
 /** Manual travel override in whole minutes: null = automatic, 0 = no drive, 1-1440 = minutes (up to 24 h). */
@@ -140,8 +146,8 @@ eventsRouter.post('/', async (c) => {
     `INSERT INTO events (
        id, title, description, location, start_iso, end_iso, all_day,
        member_ids_json, calendar_source_id, external_event_id, recurrence_rule,
-       exception_dates_json, deleted, updated_at, travel_minutes, driver_member_id
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`
+       exception_dates_json, deleted, updated_at, travel_minutes, driver_member_id, away_mode
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`
   ).run(
     id,
     (body.title || 'New Event').trim(),
@@ -157,7 +163,8 @@ eventsRouter.post('/', async (c) => {
     JSON.stringify(exceptionDates),
     nowIso,
     cleanTravelMinutes(body.travelMinutes),
-    body.driverMemberId || null
+    body.driverMemberId || null,
+    cleanAwayMode(body.awayMode)
   );
 
   if (calendarSourceId) {
@@ -246,12 +253,13 @@ eventsRouter.put('/:id', async (c) => {
       : existing.driver_member_id
       ? String(existing.driver_member_id)
       : null;
+  const awayMode = body.awayMode !== undefined ? cleanAwayMode(body.awayMode) : cleanAwayMode(existing.away_mode);
 
   db.prepare(
     `UPDATE events
      SET title = ?, description = ?, location = ?, start_iso = ?, end_iso = ?,
          all_day = ?, member_ids_json = ?, recurrence_rule = ?, exception_dates_json = ?,
-         updated_at = ?, travel_minutes = ?, driver_member_id = ?
+         updated_at = ?, travel_minutes = ?, driver_member_id = ?, away_mode = ?
      WHERE id = ?`
   ).run(
     title,
@@ -266,6 +274,7 @@ eventsRouter.put('/:id', async (c) => {
     nowIso,
     travelMinutes,
     driverMemberId,
+    awayMode,
     targetId
   );
 

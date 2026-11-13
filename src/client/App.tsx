@@ -204,7 +204,7 @@ export const App: React.FC = () => {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {/* Top Skylight Header Bar */}
-        <header className="h-[72px] shrink-0 px-4 md:px-6 border-b border-stone-200/80 bg-[#FAF8F5] flex items-center justify-between gap-3">
+        <header className="h-14 md:h-[72px] shrink-0 px-4 md:px-6 border-b border-stone-200/80 bg-[#FAF8F5] flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <h1 className="text-xl md:text-2xl font-black tracking-tight text-slate-900 truncate">
               {settings.familyName}

@@ -63,6 +63,7 @@ export function loadAppSettings(): AppSettings & {
     ),
     showBirthdays: Boolean(map.showBirthdays ?? DEFAULT_SETTINGS.showBirthdays),
     showHolidays: Boolean(map.showHolidays ?? DEFAULT_SETTINGS.showHolidays),
+    showWeatherOnCalendar: Boolean(map.showWeatherOnCalendar ?? true),
     showBriefOnScreensaver: Boolean(map.showBriefOnScreensaver ?? DEFAULT_SETTINGS.showBriefOnScreensaver),
     groceryAisleOrder: orderAisles(Array.isArray(map.groceryAisleOrder) ? (map.groceryAisleOrder as string[]) : null),
     defaultGroceryListId: String(
@@ -113,6 +114,7 @@ settingsRouter.put('/', async (c) => {
     'showDinnerOnCalendar',
     'showBirthdays',
     'showHolidays',
+    'showWeatherOnCalendar',
     'showBriefOnScreensaver',
     'groceryAisleOrder',
     'defaultGroceryListId',

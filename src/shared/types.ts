@@ -73,6 +73,8 @@ export interface CalendarEvent {
    * On create/update it sets the manual override: null = automatic, 0 = no drive, n = n minutes.
    */
   travelMinutes?: number | null;
+  /** Away from home for chores: 'away', 'home', or null = decide automatically (Lucarne-only) */
+  awayMode?: import('./away.js').AwayMode;
   /** The manual override as stored: null = automatic, 0 = no drive, n = n minutes */
   travelManualMinutes?: number | null;
   /** Google Maps drive time from home (null when unknown, not a full address, or Maps is off) */
@@ -419,6 +421,8 @@ export interface AppSettings {
   showDinnerOnCalendar: boolean;
   showBirthdays: boolean;
   showHolidays: boolean;
+  /** Daily forecast icons on calendar days (Filter menu) */
+  showWeatherOnCalendar?: boolean;
   /** Photo frame shows today's events, dinner, chores left and countdowns */
   showBriefOnScreensaver: boolean;
   /** Aisles in the order you walk your store (grocery lists are grouped in this order) */

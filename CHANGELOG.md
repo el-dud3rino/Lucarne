@@ -6,6 +6,30 @@ The release workflow stops if the tagged version has no section.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-13
+
+**Smoother on phones and on the wall.** The phone calendar is rebuilt as a list you can actually read, multi-day events are drawn once instead of on every day, and chores know when someone is away.
+
+### Phone
+- **Calendar list:** each day shows its date on the left and compact event rows on the right, with about a week on one screen. Trips show "Day 3 of 7" and later days collapse to a slim row. Dinner shows when one is planned.
+- **Calendar month:** dots for each day's events; tap a day to see its events underneath.
+- 5-Day, Week and People are wall-only now. A + button sits in the corner, a "Today" button appears when you've moved away, and Countdowns, Magic Import and the calendar filter live under the ⋯ button.
+- **Chores:** pick one person at a time from a row of avatars, instead of side-scrolling columns.
+- **Meals:** a list of days with Breakfast, Lunch and Dinner rows (they were hidden before), opening on today.
+- **Lists:** aisle sections fold up, and checked-off items hide behind a "Completed" toggle.
+- **Home:** the Today card is no longer squashed, and the top header is shorter.
+
+### Wall display
+- **Multi-day events** are one bar across the days in 5-Day, Week and Month, instead of repeating in every day.
+- **Month view** never cuts an event in half: when a day is full it shows a "+N more" chip; tap the date to see everything that day.
+- **Finished events fade** in every calendar view.
+- **Filter menu:** show or hide birthdays, holidays, dinner plans and weather on the calendar. Week view shows how many events each day has.
+
+### Everywhere
+- **Swipe left or right** to change days on the calendar, chores and meals (or months in month view), with a quick slide.
+- **Away from home:** when someone has a vacation or trip (all-day or multi-day, not at your home address), their chores move to **Up for grabs** so anyone can do them for the stars. Each event has an "Away from home" setting: Auto, Away or Not away. Family-wide events never send everyone away automatically.
+- **Skip a chore** for one day: no stars, and it doesn't count as missed. Tap it again to undo.
+
 ## [0.1.2] - 2026-11-13
 
 Fixes for using Lucarne on a phone.

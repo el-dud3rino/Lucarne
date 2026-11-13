@@ -1,11 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  CalendarDays,
   Car,
   ChevronLeft,
   ChevronRight,
   Clock,
   Hourglass,
+  List as ListIcon,
+  MoreHorizontal,
+  SlidersHorizontal,
   Lock,
   MapPin,
   Plus,
@@ -16,12 +20,25 @@ import {
 } from 'lucide-react';
 import { CountdownStrip, CountdownsSheet } from '../components/Countdowns.js';
 import { MagicImportSheet } from '../components/MagicImport.js';
+import { Sheet } from '../components/Sheet.js';
+import { useIsPhone, useSwipePaging } from '../lib/gestures.js';
+import {
+  daysBetween,
+  eventDayRange,
+  isMultiDay,
+  itemsThatFit,
+  lanesPerColumn,
+  layoutSpanBars,
+  splitForMore,
+  type SpanBar,
+} from '../../shared/calendarLayout.js';
 import { apiFetch } from '../lib/api.js';
 import { PlaceInput } from '../components/PlaceInput.js';
 import { isFullAddress } from '../../shared/driveTime.js';
 import { eventLook, memberSwatch } from '../lib/eventColors.js';
 import { DayWeather, useDailyForecast } from '../lib/weather.js';
 import { CATEGORY_STYLES, EVENT_CATEGORIES, type EventCategory } from '../../shared/eventCategories.js';
+import { looksLikeTrip, type AwayMode } from '../../shared/away.js';
 import {
   addDays,
   eventOccursOnDay,
@@ -39,6 +56,14 @@ import type {
 } from '../../shared/types.js';
 
 export type CalendarSubView = 'schedule' | 'people' | 'week' | 'month';
+
+/** A multi-day bar is 40px tall (touch size) with 10px below it, matching the event list spacing. */
+const SPAN_ROW_PX = 50;
+/** Day column header (h-16) plus its 1px border and the list's 12px padding */
+const COLUMN_BODY_TOP_PX = 64 + 1 + 12;
+/** Month cells: 40px tall date row, 40px items with 4px gaps */
+const MONTH_HEADER_PX = 40;
+const MONTH_ITEM_PX = 44;
 
 interface CalendarViewProps {
   members: FamilyMember[];
@@ -63,7 +88,15 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   onOpenMealTab,
 }) => {
   const queryClient = useQueryClient();
-  const [subView, setSubView] = useState<CalendarSubView>('schedule');
+  const isPhone = useIsPhone();
+  // Phones get a list (agenda) or month; the wall gets 5-Day, People, Week and Month.
+  const [wallView, setWallView] = useState<CalendarSubView>('schedule');
+  const [phoneView, setPhoneView] = useState<'agenda' | 'month'>('agenda');
+  const subView: CalendarSubView | 'agenda' = isPhone ? (phoneView === 'month' ? 'month' : 'agenda') : wallView;
+  const setSubView = setWallView;
+  const [dayPopover, setDayPopover] = useState<Date | null>(null);
+  const [showOptions, setShowOptions] = useState(false);
+  const [page, setPage] = useState<{ direction: 'left' | 'right' | null; key: number }>({ direction: null, key: 0 });
   const [anchorDate, setAnchorDate] = useState<Date>(() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
@@ -212,20 +245,46 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     });
   };
 
+  const [selectedDay, setSelectedDay] = useState<Date>(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  });
+
   const stepAnchor = (dir: -1 | 1) => {
-    if (subView === 'schedule') setAnchorDate((d) => addDays(d, dir * 5));
+    setPage((p) => ({ direction: dir === 1 ? 'left' : 'right', key: p.key + 1 }));
+    if (subView === 'agenda') setAnchorDate((d) => addDays(d, dir * 7));
+    else if (subView === 'schedule') setAnchorDate((d) => addDays(d, dir * 5));
     else if (subView === 'people') setAnchorDate((d) => addDays(d, dir * 1));
     else if (subView === 'week') setAnchorDate((d) => addDays(d, dir * 7));
     else {
-      setAnchorDate((d) => new Date(d.getFullYear(), d.getMonth() + dir, 1));
+      setAnchorDate((d) => {
+        const next = new Date(d.getFullYear(), d.getMonth() + dir, 1);
+        const now = new Date();
+        now.setHours(0, 0, 0, 0);
+        setSelectedDay(next.getMonth() === now.getMonth() && next.getFullYear() === now.getFullYear() ? now : next);
+        return next;
+      });
     }
   };
+
+  const goToday = () => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    setAnchorDate(now);
+    setSelectedDay(now);
+  };
+
+  // Swipe left/right anywhere on the calendar to page through days (or months).
+  const swipeRef = useRef<HTMLDivElement>(null);
+  useSwipePaging(swipeRef, { onPrev: () => stepAnchor(-1), onNext: () => stepAnchor(1) });
 
 
   const today = new Date();
 
   // Days currently on screen, for the toolbar heading and the "Today" button state.
   const visibleRange = useMemo((): [Date, Date] => {
+    if (subView === 'agenda') return [anchorDate, addDays(anchorDate, 6)];
     if (subView === 'schedule') return [anchorDate, addDays(anchorDate, 4)];
     if (subView === 'week') {
       const start = startOfWeek(anchorDate, 0);
@@ -286,8 +345,15 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     );
   };
 
+  const nowMs = Date.now();
+  const todayStr = toDateStr(today);
+  /** Finished events fade out, like crossing them off. */
+  const isPast = (ev: CalendarEvent) => (ev.allDay ? eventDayRange(ev).end < todayStr : new Date(ev.endIso).getTime() < nowMs);
+  const showWeather = settings.showWeatherOnCalendar !== false;
+
   const renderEventCard = (ev: CalendarEvent, compact = false) => {
     const look = eventLook(ev, members);
+    const pastCls = isPast(ev) ? 'opacity-50' : '';
     const assigned = ev.memberIds.map((id) => memberMap.get(id)).filter((x): x is FamilyMember => Boolean(x));
     // A Family event shows one striped Family badge rather than every person's initial.
     const evMembers = assigned.some((m) => m.role === 'family') ? assigned.filter((m) => m.role === 'family') : assigned;
@@ -304,7 +370,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           }}
           style={{ background: look.background, color: look.text }}
           data-striped={look.striped || undefined}
-          className="relative w-full text-left rounded-xl shadow-2xs transition active:scale-[0.98] hover:brightness-[0.98] h-10 min-h-[40px] max-h-[40px] pl-3.5 pr-2.5 py-1.5 flex items-center gap-2 overflow-hidden"
+          className={`relative w-full text-left rounded-xl shadow-2xs transition active:scale-[0.98] hover:brightness-[0.98] h-10 min-h-[40px] max-h-[40px] pl-3.5 pr-2.5 py-1.5 flex items-center gap-2 overflow-hidden ${pastCls}`}
         >
           {bar}
           {!ev.allDay && (
@@ -331,7 +397,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         }}
         style={{ background: look.background, color: look.text }}
         data-striped={look.striped || undefined}
-        className="relative overflow-hidden w-full text-left rounded-xl shadow-2xs transition active:scale-[0.98] hover:brightness-[0.98] min-h-[40px] flex flex-col justify-center pl-[18px] pr-3.5 py-2.5"
+        className={`relative overflow-hidden w-full text-left rounded-xl shadow-2xs transition active:scale-[0.98] hover:brightness-[0.98] min-h-[40px] flex flex-col justify-center pl-[18px] pr-3.5 py-2.5 ${pastCls}`}
       >
         {bar}
         <div className="flex items-start justify-between gap-2">
@@ -368,12 +434,12 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     );
   };
 
-  const renderDayColumn = (day: Date, showWeekdayBig = true) => {
+  const renderDayColumn = (day: Date, showWeekdayBig = true, reservedLanes = 0) => {
     const dayStr = toDateStr(day);
     const isToday = isSameDay(day, today);
-    const dayEvents = filteredEvents.filter((ev) =>
-      eventOccursOnDay(ev.startIso, ev.endIso, ev.allDay, day)
-    );
+    const allDayEventsToday = filteredEvents.filter((ev) => eventOccursOnDay(ev.startIso, ev.endIso, ev.allDay, day));
+    // Multi-day events are drawn as one bar across the columns instead of once per day.
+    const dayEvents = allDayEventsToday.filter((ev) => !isMultiDay(ev));
     const allDayEvents = dayEvents.filter((e) => e.allDay);
     const timedEvents = dayEvents.filter((e) => !e.allDay);
     const dinner = dinnerByDate.get(dayStr);
@@ -382,7 +448,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       <div
         key={dayStr}
         onClick={() => openNewEventForDay(day)}
-        className={`flex flex-col h-auto min-h-[260px] md:h-full rounded-2xl border transition cursor-pointer overflow-hidden ${
+        className={`flex flex-col h-full min-w-0 rounded-2xl border transition cursor-pointer overflow-hidden ${
           isToday
             ? 'bg-white border-sky-300 ring-2 ring-sky-100 shadow-sm'
             : 'bg-white/95 border-stone-200/90 shadow-2xs'
@@ -390,24 +456,28 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       >
         {/* Day Header */}
         <div
-          className={`px-4 py-3 border-b flex items-center justify-between ${
+          className={`h-16 shrink-0 px-3 xl:px-4 border-b flex items-center justify-between gap-1 ${
             isToday ? 'bg-sky-50/70 border-sky-200/70' : 'border-stone-100'
           }`}
         >
-          <div>
+          <div className="min-w-0">
             <div
-              className={`text-xs font-bold uppercase tracking-wider ${
+              className={`text-xs font-bold uppercase tracking-wider truncate ${
                 isToday ? 'text-sky-600' : 'text-stone-400'
               }`}
             >
               {day.toLocaleDateString([], { weekday: showWeekdayBig ? 'long' : 'short' })}
+              {!showWeekdayBig && allDayEventsToday.length > 0 && (
+                <span className="normal-case tracking-normal font-semibold text-stone-400"> · {allDayEventsToday.length}</span>
+              )}
             </div>
             <div className="text-xl font-extrabold text-slate-800 leading-tight">
               {day.toLocaleDateString([], { month: 'short', day: 'numeric' })}
             </div>
           </div>
 
-          <DayWeather forecast={forecast?.get(dayStr)} />
+          <span className="hidden xl:block">{showWeather && <DayWeather forecast={forecast?.get(dayStr)} />}</span>
+          <span className="xl:hidden">{showWeather && <DayWeather forecast={forecast?.get(dayStr)} variant="compact" />}</span>
 
           <button
             type="button"
@@ -424,9 +494,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 
         {/* Events Scroll List */}
         <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
+          {reservedLanes > 0 && <div aria-hidden style={{ height: reservedLanes * SPAN_ROW_PX - 10 }} />}
           {allDayEvents.map((ev) => renderEventCard(ev))}
           {timedEvents.map((ev) => renderEventCard(ev))}
-          {dayEvents.length === 0 && (
+          {dayEvents.length === 0 && reservedLanes === 0 && (
             <div className="h-28 flex items-center justify-center text-sm text-stone-300 font-medium">
               Tap + to add event
             </div>
@@ -459,25 +530,434 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     );
   };
 
+  // Month cells measure their real height so a day never shows half an event.
+  const monthBodyRef = useRef<HTMLDivElement>(null);
+  const [monthBodyH, setMonthBodyH] = useState(0);
+  useEffect(() => {
+    const el = monthBodyRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => setMonthBodyH(el.clientHeight));
+    ro.observe(el);
+    setMonthBodyH(el.clientHeight);
+    return () => ro.disconnect();
+  }, [subView, isPhone, page.key]);
+
+  const evMembersFor = (ev: CalendarEvent) => {
+    const assigned = ev.memberIds.map((id) => memberMap.get(id)).filter((x): x is FamilyMember => Boolean(x));
+    return assigned.some((m) => m.role === 'family') ? assigned.filter((m) => m.role === 'family') : assigned;
+  };
+
+  const shortDate = (d: string) =>
+    new Date(`${d}T12:00:00`).toLocaleDateString([], { month: 'short', day: 'numeric' });
+
+  /** One bar for an event that spans several days, positioned over the day columns or month cells. */
+  const renderSpanBar = (b: SpanBar<CalendarEvent>, style: React.CSSProperties) => {
+    const look = eventLook(b.ev, members);
+    const r = eventDayRange(b.ev);
+    return (
+      <button
+        key={`${b.ev.id}-${b.col}`}
+        type="button"
+        data-span-bar
+        onClick={(e) => {
+          e.stopPropagation();
+          setEditingEvent(b.ev);
+        }}
+        title={`${b.ev.title} · ${shortDate(r.start)} – ${shortDate(r.end)}`}
+        style={{ ...style, background: look.background, color: look.text }}
+        data-striped={look.striped || undefined}
+        className={`absolute z-10 h-10 min-h-[40px] flex items-center gap-2 pl-3.5 pr-2.5 shadow-2xs overflow-hidden text-left transition active:scale-[0.99] hover:brightness-[0.98] ${
+          b.continuesBefore ? 'rounded-l-md' : 'rounded-l-xl'
+        } ${b.continuesAfter ? 'rounded-r-md' : 'rounded-r-xl'} ${isPast(b.ev) ? 'opacity-50' : ''}`}
+      >
+        {!b.continuesBefore && <span aria-hidden className="absolute left-0 inset-y-0 w-1" style={{ background: look.bar }} />}
+        {b.continuesBefore && <ChevronLeft aria-hidden className="w-4 h-4 -ml-2 shrink-0 opacity-60" />}
+        <span className="text-xs md:text-sm font-bold truncate">
+          {b.ev.category && <span aria-hidden className="mr-1">{CATEGORY_STYLES[b.ev.category].icon}</span>}
+          {b.ev.title}
+        </span>
+        {b.span >= 2 && (
+          <span className="text-[11px] font-semibold opacity-70 whitespace-nowrap hidden lg:inline">
+            {shortDate(r.start)} – {shortDate(r.end)}
+          </span>
+        )}
+        <span className="ml-auto flex items-center gap-1 shrink-0">
+          {renderAvatars(evMembersFor(b.ev), 3)}
+          {b.continuesAfter && <ChevronRight aria-hidden className="w-4 h-4 opacity-60" />}
+        </span>
+      </button>
+    );
+  };
+
+  /** 5-Day and Week: day columns with multi-day events drawn once across them. */
+  const renderColumns = (days: Date[], big: boolean) => {
+    const n = days.length;
+    const gap = n === 5 ? 14 : 10;
+    const bars = layoutSpanBars(filteredEvents, toDateStr(days[0]), n);
+    const lanes = bars.reduce((m, b) => Math.max(m, b.lane + 1), 0);
+    const colW = `((100% - ${(n - 1) * gap}px) / ${n})`;
+    return (
+      <div className="h-full relative grid" style={{ gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))`, gap }}>
+        {days.map((d) => renderDayColumn(d, big, lanes))}
+        {bars.map((b) =>
+          renderSpanBar(b, {
+            top: COLUMN_BODY_TOP_PX + b.lane * SPAN_ROW_PX,
+            left: `calc(${colW} * ${b.col} + ${b.col * gap}px + 12px)`,
+            width: `calc(${colW} * ${b.span} + ${(b.span - 1) * gap}px - 24px)`,
+          })
+        )}
+      </div>
+    );
+  };
+
+  /** Phone list row for one event: title, time (or how far into a trip), people. */
+  const renderAgendaCard = (ev: CalendarEvent, day: Date, firstListedDay = false) => {
+    const look = eventLook(ev, members);
+    const r = eventDayRange(ev);
+    const multi = r.end > r.start;
+    const dayStr = toDateStr(day);
+    // Later days of a trip get a slim reminder row instead of a full card.
+    if (multi && dayStr > r.start && !firstListedDay) {
+      const total = daysBetween(r.start, r.end) + 1;
+      const n = daysBetween(r.start, dayStr) + 1;
+      return (
+        <button
+          key={`${ev.id}-${dayStr}`}
+          type="button"
+          onClick={() => setEditingEvent(ev)}
+          style={{ background: look.background, color: look.text }}
+          data-striped={look.striped || undefined}
+          className={`relative overflow-hidden w-full text-left rounded-xl min-h-[40px] h-10 pl-4 pr-3 flex items-center gap-2 opacity-80 active:scale-[0.99] transition ${
+            isPast(ev) ? 'opacity-40' : ''
+          }`}
+        >
+          <span aria-hidden className="absolute left-0 inset-y-0 w-1" style={{ background: look.bar }} />
+          <span className="text-xs font-bold truncate flex-1">{ev.title}</span>
+          <span className="text-[11px] font-semibold opacity-75 whitespace-nowrap">
+            Day {n} of {total}
+          </span>
+        </button>
+      );
+    }
+    let when: string;
+    if (multi) {
+      const total = daysBetween(r.start, r.end) + 1;
+      const n = daysBetween(r.start, dayStr) + 1;
+      when = `Day ${n} of ${total} · ${shortDate(r.start)} – ${shortDate(r.end)}`;
+    } else if (ev.allDay) {
+      when = 'All day';
+    } else {
+      when = `${formatTimeShort(ev.startIso)} – ${formatTimeShort(ev.endIso)}`;
+    }
+    return (
+      <button
+        key={`${ev.id}-${dayStr}`}
+        type="button"
+        onClick={() => setEditingEvent(ev)}
+        style={{ background: look.background, color: look.text }}
+        data-striped={look.striped || undefined}
+        className={`relative overflow-hidden w-full text-left rounded-xl shadow-2xs min-h-[48px] pl-4 pr-3 py-2 flex items-center gap-2 active:scale-[0.99] transition ${
+          isPast(ev) ? 'opacity-50' : ''
+        }`}
+      >
+        <span aria-hidden className="absolute left-0 inset-y-0 w-1" style={{ background: look.bar }} />
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-bold leading-snug truncate">
+            {ev.category && <span aria-hidden className="mr-1">{CATEGORY_STYLES[ev.category].icon}</span>}
+            {ev.title}
+          </span>
+          <span className="block text-xs font-semibold opacity-75 truncate">
+            {when}
+            {ev.location && !multi ? ` · ${ev.location}` : ''}
+          </span>
+        </span>
+        {renderAvatars(evMembersFor(ev), 3)}
+      </button>
+    );
+  };
+
+  const eventsOn = (day: Date) => filteredEvents.filter((ev) => eventOccursOnDay(ev.startIso, ev.endIso, ev.allDay, day));
+
+  /** One day in the phone list: date on the left, that day's events on the right. */
+  const renderAgendaDay = (day: Date, firstListedDay = false) => {
+    const dayStr = toDateStr(day);
+    const isToday = isSameDay(day, today);
+    const list = eventsOn(day);
+    const dinner = settings.showDinnerOnCalendar ? dinnerByDate.get(dayStr) : undefined;
+    return (
+      <div key={dayStr} className="flex gap-3 py-2.5 border-b border-stone-200/70 last:border-b-0" data-agenda-day={dayStr}>
+        <button
+          type="button"
+          onClick={() => openNewEventForDay(day)}
+          aria-label={`Add an event on ${day.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}`}
+          className="w-12 min-h-[48px] shrink-0 flex flex-col items-center justify-start pt-0.5"
+        >
+          <span className={`text-[11px] font-bold uppercase tracking-wider ${isToday ? 'text-sky-600' : 'text-stone-400'}`}>
+            {day.toLocaleDateString([], { weekday: 'short' })}
+          </span>
+          <span
+            className={`w-9 h-9 rounded-full flex items-center justify-center text-lg font-extrabold ${
+              isToday ? 'bg-sky-600 text-white' : 'text-slate-800'
+            }`}
+          >
+            {day.getDate()}
+          </span>
+          {showWeather && (
+            <span className="mt-0.5">
+              <DayWeather forecast={forecast?.get(dayStr)} variant="compact" />
+            </span>
+          )}
+        </button>
+        <div className="flex-1 min-w-0 space-y-1.5">
+          {[...list]
+            .sort((a, b) => Number(isMultiDay(b) && eventDayRange(b).start < toDateStr(day)) - Number(isMultiDay(a) && eventDayRange(a).start < toDateStr(day)))
+            .map((ev) => renderAgendaCard(ev, day, firstListedDay))}
+          {dinner && (
+            <button
+              type="button"
+              onClick={onOpenMealTab}
+              className="w-full min-h-[40px] px-3 rounded-xl bg-amber-50 border border-amber-200/70 text-amber-950 text-sm font-semibold flex items-center gap-2 text-left"
+            >
+              <Utensils className="w-4 h-4 text-amber-600 shrink-0" />
+              <span className="truncate">{dinner.recipe?.title || dinner.customTitle}</span>
+            </button>
+          )}
+          {list.length === 0 && !dinner && (
+            <button
+              type="button"
+              onClick={() => openNewEventForDay(day)}
+              className="w-full h-10 min-h-[40px] px-1 text-left text-sm text-stone-300 font-medium"
+            >
+              Nothing planned
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderAgenda = () => (
+    <div ref={dayListRef} className="h-full overflow-y-auto pb-24 -mx-1 px-1">
+      {Array.from({ length: 7 }, (_, i) => renderAgendaDay(addDays(anchorDate, i), i === 0))}
+    </div>
+  );
+
+  const weekdayHeader = (
+    <div className="grid grid-cols-7 border-b border-stone-200 bg-stone-50/70 shrink-0">
+      {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
+        <div key={d} className="py-2 text-center text-xs font-bold uppercase tracking-wider text-stone-500">
+          {isPhone ? d.slice(0, 1) : d}
+        </div>
+      ))}
+    </div>
+  );
+
+  const renderWallMonth = () => {
+    const gridStart = startOfMonthGrid(anchorDate);
+    const rowH = monthBodyH > 0 ? monthBodyH / monthGridInfo.numWeeks : 150;
+    // Items that fit under the date row (multi-day bars and single events share the space).
+    const capacity = Math.max(1, itemsThatFit(rowH - MONTH_HEADER_PX - 6, 40, 4));
+    return (
+      <div className="h-full flex flex-col bg-white rounded-2xl border border-stone-200 shadow-2xs overflow-hidden" data-month-grid>
+        {weekdayHeader}
+        <div ref={monthBodyRef} className="flex-1 min-h-0 flex flex-col divide-y divide-stone-100">
+          {Array.from({ length: monthGridInfo.numWeeks }, (_, w) => {
+            const weekStart = addDays(gridStart, w * 7);
+            const allBars = layoutSpanBars(filteredEvents, toDateStr(weekStart), 7);
+            const shownBars = allBars.filter((b) => b.lane < capacity);
+            const lanesInCol = lanesPerColumn(shownBars, 7);
+            return (
+              <div key={w} className="relative flex-1 min-h-0 grid grid-cols-7 divide-x divide-stone-100" data-month-week>
+                {Array.from({ length: 7 }, (_, c) => {
+                  const cellDay = addDays(weekStart, c);
+                  const inMonth = cellDay.getMonth() === anchorDate.getMonth();
+                  const isToday = isSameDay(cellDay, today);
+                  const singles = eventsOn(cellDay).filter((ev) => !isMultiDay(ev));
+                  const hiddenBars = allBars.filter((b) => b.lane >= capacity && c >= b.col && c < b.col + b.span).length;
+                  const { shown, more } = splitForMore(singles, capacity - lanesInCol[c]);
+                  const moreCount = more + hiddenBars;
+                  return (
+                    <div
+                      key={c}
+                      data-month-cell
+                      onClick={() => openNewEventForDay(cellDay)}
+                      className={`min-w-0 px-1 pb-1 flex flex-col gap-1 overflow-hidden cursor-pointer hover:bg-stone-50/70 transition ${
+                        !inMonth ? 'bg-stone-50/40 opacity-50' : ''
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDayPopover(cellDay);
+                        }}
+                        aria-label={`${cellDay.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}${
+                          moreCount ? `, ${moreCount} more` : ''
+                        }`}
+                        className="h-10 min-h-[40px] w-full shrink-0 flex items-center gap-1 px-0.5 rounded-lg hover:bg-stone-100/70"
+                      >
+                        <span
+                          className={`w-7 h-7 rounded-full text-xs font-bold flex items-center justify-center shrink-0 ${
+                            isToday ? 'bg-sky-600 text-white' : 'text-slate-700'
+                          }`}
+                        >
+                          {cellDay.getDate()}
+                        </span>
+                        {showWeather && (
+                          <span className="ml-auto">
+                            <DayWeather forecast={forecast?.get(toDateStr(cellDay))} variant="compact" />
+                          </span>
+                        )}
+                        {moreCount > 0 && (
+                          <span
+                            data-more-chip
+                            className={`${showWeather ? '' : 'ml-auto'} px-2 h-6 rounded-full bg-slate-700 text-white text-[11px] font-bold flex items-center whitespace-nowrap`}
+                          >
+                            +{moreCount} more
+                          </span>
+                        )}
+                      </button>
+                      {lanesInCol[c] > 0 && <div aria-hidden className="shrink-0" style={{ height: lanesInCol[c] * MONTH_ITEM_PX - 4 }} />}
+                      {shown.map((ev) => renderEventCard(ev, true))}
+                    </div>
+                  );
+                })}
+                {shownBars.map((b) =>
+                  renderSpanBar(b, {
+                    top: MONTH_HEADER_PX + 4 + b.lane * MONTH_ITEM_PX,
+                    left: `calc(100% / 7 * ${b.col} + 4px)`,
+                    width: `calc(100% / 7 * ${b.span} - 8px)`,
+                  })
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  /** Phone month: dots on each day; tap a day to list its events underneath. */
+  const renderPhoneMonth = () => {
+    const gridStart = startOfMonthGrid(anchorDate);
+    return (
+      <div className="h-full flex flex-col gap-2 min-h-0">
+        <div className="bg-white rounded-2xl border border-stone-200 shadow-2xs overflow-hidden shrink-0" data-month-grid>
+          {weekdayHeader}
+          <div className="grid grid-cols-7">
+            {Array.from({ length: monthGridInfo.totalCells }, (_, idx) => {
+              const cellDay = addDays(gridStart, idx);
+              const inMonth = cellDay.getMonth() === anchorDate.getMonth();
+              const isToday = isSameDay(cellDay, today);
+              const selected = isSameDay(cellDay, selectedDay);
+              const list = eventsOn(cellDay);
+              const dots = list.slice(0, 3);
+              return (
+                <button
+                  key={idx}
+                  type="button"
+                  data-month-cell
+                  onClick={() => setSelectedDay(cellDay)}
+                  aria-pressed={selected}
+                  aria-label={`${cellDay.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}, ${list.length} event${list.length === 1 ? '' : 's'}`}
+                  className={`h-12 min-h-[44px] flex flex-col items-center justify-center gap-1 transition ${!inMonth ? 'opacity-40' : ''} ${
+                    selected ? 'bg-sky-50' : ''
+                  }`}
+                >
+                  <span
+                    className={`w-7 h-7 rounded-full text-sm font-bold flex items-center justify-center ${
+                      isToday ? 'bg-sky-600 text-white' : selected ? 'ring-2 ring-sky-400 text-slate-800' : 'text-slate-700'
+                    }`}
+                  >
+                    {cellDay.getDate()}
+                  </span>
+                  <span className="flex items-center gap-0.5 h-1.5">
+                    {dots.map((ev) => (
+                      <span key={ev.id} className="w-1.5 h-1.5 rounded-full" style={{ background: eventLook(ev, members).bar }} />
+                    ))}
+                    {list.length > 3 && <span className="text-[9px] leading-none font-bold text-stone-400">+</span>}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto pb-24">{renderAgendaDay(selectedDay, true)}</div>
+      </div>
+    );
+  };
+
   return (
     <div className="h-full flex flex-col gap-3">
       {/* Calendar Sub-Toolbar */}
+      {isPhone ? (
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => stepAnchor(-1)}
+            aria-label="Previous"
+            className="w-10 h-10 min-w-[40px] rounded-xl bg-white border border-stone-200 flex items-center justify-center text-slate-700 active:scale-95 shadow-2xs"
+          >
+            <ChevronLeft className="w-5 h-5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => stepAnchor(1)}
+            aria-label="Next"
+            className="w-10 h-10 min-w-[40px] rounded-xl bg-white border border-stone-200 flex items-center justify-center text-slate-700 active:scale-95 shadow-2xs"
+          >
+            <ChevronRight className="w-5 h-5" />
+          </button>
+          <h2 className="flex-1 min-w-0 ml-1 text-base font-extrabold text-slate-800 tracking-tight truncate" aria-live="polite">
+            {rangeLabel}
+          </h2>
+          <div className="bg-stone-200/75 p-1 rounded-xl flex items-center gap-0.5 shrink-0">
+            {(
+              [
+                ['agenda', 'List view', ListIcon],
+                ['month', 'Month view', CalendarDays],
+              ] as const
+            ).map(([key, label, Icon]) => (
+              <button
+                key={key}
+                type="button"
+                aria-label={label}
+                aria-pressed={phoneView === key}
+                onClick={() => {
+                  setPhoneView(key);
+                  if (key === 'month') setSelectedDay(anchorDate);
+                }}
+                className={`w-10 h-10 min-w-[40px] rounded-lg flex items-center justify-center transition ${
+                  phoneView === key ? 'bg-white text-slate-900 shadow-xs' : 'text-stone-500'
+                }`}
+              >
+                <Icon className="w-5 h-5" />
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowOptions(true)}
+            aria-label="Calendar options"
+            className="w-10 h-10 min-w-[40px] rounded-xl bg-white border border-stone-200 flex items-center justify-center text-slate-700 active:scale-95 shadow-2xs shrink-0"
+          >
+            <MoreHorizontal className="w-5 h-5" />
+          </button>
+        </div>
+      ) : (
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => stepAnchor(-1)}
+            aria-label="Previous"
             className="w-11 h-11 rounded-2xl bg-white border border-stone-200 flex items-center justify-center text-slate-700 hover:bg-stone-50 active:scale-95 shadow-2xs"
           >
             <ChevronLeft className="w-6 h-6" />
           </button>
           <button
             type="button"
-            onClick={() => {
-              const now = new Date();
-              now.setHours(0, 0, 0, 0);
-              setAnchorDate(now);
-            }}
+            onClick={goToday}
             aria-pressed={showingToday}
             className={`px-4 h-11 rounded-2xl border font-bold text-sm active:scale-95 shadow-2xs ${
               showingToday
@@ -490,6 +970,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           <button
             type="button"
             onClick={() => stepAnchor(1)}
+            aria-label="Next"
             className="w-11 h-11 rounded-2xl bg-white border border-stone-200 flex items-center justify-center text-slate-700 hover:bg-stone-50 active:scale-95 shadow-2xs"
           >
             <ChevronRight className="w-6 h-6" />
@@ -501,7 +982,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           >
             {rangeLabel}
           </h2>
-          {subView === 'people' && (
+          {subView === 'people' && showWeather && (
             <div className="ml-3">
               <DayWeather forecast={forecast?.get(toDateStr(anchorDate))} />
             </div>
@@ -509,29 +990,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2 max-w-full overflow-x-auto">
-          <div className="bg-stone-200/75 p-1 rounded-2xl flex items-center gap-1 shrink-0">
-            {EVENT_CATEGORIES.map((cat) => {
-              const style = CATEGORY_STYLES[cat];
-              const key = cat === 'birthday' ? 'showBirthdays' : 'showHolidays';
-              const on = settings[key];
-              return (
-                <button
-                  key={cat}
-                  type="button"
-                  aria-pressed={on}
-                  title={`${on ? 'Hide' : 'Show'} ${style.label.toLowerCase()}`}
-                  onClick={() => toggleCategoryMutation.mutate({ [key]: !on })}
-                  className={`h-10 min-h-[40px] min-w-[40px] px-3 rounded-xl text-sm font-bold transition flex items-center gap-1.5 ${
-                    on ? 'bg-white shadow-xs' : 'opacity-50 line-through text-stone-500'
-                  }`}
-                  style={on ? { color: style.text } : undefined}
-                >
-                  <span aria-hidden>{style.icon}</span>
-                  <span className="hidden xl:inline">{style.label}</span>
-                </button>
-              );
-            })}
-          </div>
           <div className="bg-stone-200/75 p-1 rounded-2xl flex items-center gap-1 shrink-0">
             {(
               [
@@ -556,6 +1014,15 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             ))}
           </div>
 
+          <button
+            type="button"
+            onClick={() => setShowOptions(true)}
+            title="Choose what shows on the calendar"
+            className="h-11 min-w-[44px] px-3 rounded-2xl bg-white border border-stone-200 text-slate-700 font-bold text-sm flex items-center gap-2 shadow-2xs active:scale-95 shrink-0"
+          >
+            <SlidersHorizontal className="w-5 h-5" />
+            <span className="hidden xl:inline">Filter</span>
+          </button>
           <button
             type="button"
             onClick={() => setCountdownSheet({})}
@@ -586,24 +1053,21 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           </button>
         </div>
       </div>
+      )}
 
       <CountdownStrip members={members} onOpen={() => setCountdownSheet({})} />
 
-      {/* Main Calendar Grid Area */}
-      <div className="flex-1 min-h-0">
-        {subView === 'schedule' && (
-          <div ref={dayListRef} className="h-full grid grid-cols-1 auto-rows-max md:auto-rows-auto md:grid-cols-2 lg:grid-cols-5 gap-3.5 overflow-y-auto md:overflow-hidden">
-            {[0, 1, 2, 3, 4].map((offset) => renderDayColumn(addDays(anchorDate, offset), true))}
-          </div>
-        )}
+      {/* Main Calendar Grid Area: swipe left/right to page */}
+      <div ref={swipeRef} className="flex-1 min-h-0 relative touch-pan-y">
+        <div
+          key={page.key}
+          className={`h-full ${page.direction === 'left' ? 'animate-page-left' : page.direction === 'right' ? 'animate-page-right' : ''}`}
+        >
+        {subView === 'agenda' && renderAgenda()}
 
-        {subView === 'week' && (
-          <div ref={dayListRef} className="h-full grid grid-cols-1 auto-rows-max md:auto-rows-auto md:grid-cols-7 gap-2.5 overflow-y-auto md:overflow-hidden">
-            {[0, 1, 2, 3, 4, 5, 6].map((offset) =>
-              renderDayColumn(addDays(startOfWeek(anchorDate, 0), offset), false)
-            )}
-          </div>
-        )}
+        {subView === 'schedule' && renderColumns([0, 1, 2, 3, 4].map((o) => addDays(anchorDate, o)), true)}
+
+        {subView === 'week' && renderColumns([0, 1, 2, 3, 4, 5, 6].map((o) => addDays(startOfWeek(anchorDate, 0), o)), false)}
 
         {subView === 'people' && (
           <div
@@ -655,65 +1119,111 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           </div>
         )}
 
-        {subView === 'month' && (
-          <div className="h-full flex flex-col bg-white rounded-2xl border border-stone-200 shadow-2xs overflow-hidden">
-            <div className="grid grid-cols-7 border-b border-stone-200 bg-stone-50/70">
-              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
-                <div
-                  key={d}
-                  className="py-2 text-center text-xs font-bold uppercase tracking-wider text-stone-500"
-                >
-                  {d}
-                </div>
-              ))}
-            </div>
-            <div
-              className="flex-1 grid grid-cols-7 grid-rows-5 divide-x divide-y divide-stone-100 min-h-0"
-              style={{ gridTemplateRows: `repeat(${monthGridInfo.numWeeks}, minmax(0, 1fr))` }}
-            >
-              {Array.from({ length: monthGridInfo.totalCells }).map((_, idx) => {
-                const cellDay = addDays(startOfMonthGrid(anchorDate), idx);
-                const inMonth = cellDay.getMonth() === anchorDate.getMonth();
-                const isToday = isSameDay(cellDay, today);
-                const dayEvents = filteredEvents.filter((ev) =>
-                  eventOccursOnDay(ev.startIso, ev.endIso, ev.allDay, cellDay)
-                );
-
-                return (
-                  <div
-                    key={idx}
-                    onClick={() => openNewEventForDay(cellDay)}
-                    className={`p-1.5 flex flex-col gap-1 overflow-hidden cursor-pointer hover:bg-stone-50/70 transition ${
-                      !inMonth ? 'bg-stone-50/40 opacity-50' : ''
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span
-                        className={`w-7 h-7 rounded-full text-xs font-bold flex items-center justify-center ${
-                          isToday ? 'bg-sky-600 text-white' : 'text-slate-700'
-                        }`}
-                      >
-                        {cellDay.getDate()}
-                      </span>
-                      <span className="ml-auto mr-1">
-                        <DayWeather forecast={forecast?.get(toDateStr(cellDay))} variant="compact" />
-                      </span>
-                      {dayEvents.length > monthGridInfo.maxEvents && (
-                        <span className="text-[11px] font-bold text-stone-400">
-                          +{dayEvents.length - monthGridInfo.maxEvents}
-                        </span>
-                      )}
-                    </div>
-                    <div className="space-y-1 overflow-hidden">
-                      {dayEvents.slice(0, monthGridInfo.maxEvents).map((ev) => renderEventCard(ev, true))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
+        {subView === 'month' && (isPhone ? renderPhoneMonth() : renderWallMonth())}
+        </div>
       </div>
+
+      {/* Phones: add button in the corner, and a way back to today */}
+      {isPhone && (
+        <>
+          {!showingToday && (
+            <button
+              type="button"
+              onClick={goToday}
+              className="fixed left-4 bottom-[calc(5rem+env(safe-area-inset-bottom,0px))] z-30 h-11 px-4 rounded-full bg-white border border-stone-200 shadow-md font-bold text-sm text-sky-700 active:scale-95"
+            >
+              Today
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => openNewEventForDay(subView === 'month' ? selectedDay : anchorDate)}
+            aria-label="Add event"
+            className="fixed right-4 bottom-[calc(5rem+env(safe-area-inset-bottom,0px))] z-30 w-14 h-14 rounded-full bg-sky-600 text-white shadow-lg flex items-center justify-center active:scale-95"
+          >
+            <Plus className="w-7 h-7" />
+          </button>
+        </>
+      )}
+
+      {/* Everything on one day (month "+N more") */}
+      {dayPopover && (
+        <Sheet
+          title={dayPopover.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}
+          onClose={() => setDayPopover(null)}
+          maxWidth="max-w-md"
+        >
+          <div className="space-y-2.5">
+            {eventsOn(dayPopover).map((ev) => renderEventCard(ev))}
+            {eventsOn(dayPopover).length === 0 && <div className="text-sm text-stone-400 py-4 text-center">Nothing planned</div>}
+            <button
+              type="button"
+              onClick={() => {
+                const d = dayPopover;
+                setDayPopover(null);
+                openNewEventForDay(d);
+              }}
+              className="w-full h-11 rounded-2xl bg-sky-600 text-white font-bold text-sm flex items-center justify-center gap-2"
+            >
+              <Plus className="w-5 h-5" /> Add event
+            </button>
+          </div>
+        </Sheet>
+      )}
+
+      {/* What shows on the calendar (and, on phones, the extra tools) */}
+      {showOptions && (
+        <Sheet title="Show on calendar" onClose={() => setShowOptions(false)} maxWidth="max-w-sm">
+          <div className="space-y-2">
+            {(
+              [
+                ['showBirthdays', `${CATEGORY_STYLES.birthday.icon} Birthdays`, settings.showBirthdays],
+                ['showHolidays', `${CATEGORY_STYLES.holiday.icon} Holidays`, settings.showHolidays],
+                ['showDinnerOnCalendar', '🍽️ Dinner plans', settings.showDinnerOnCalendar],
+                ['showWeatherOnCalendar', '🌤️ Weather', showWeather],
+              ] as const
+            ).map(([key, label, on]) => (
+              <button
+                key={key}
+                type="button"
+                role="switch"
+                aria-checked={on}
+                onClick={() => toggleCategoryMutation.mutate({ [key]: !on })}
+                className="w-full h-12 px-4 rounded-2xl bg-stone-50 hover:bg-stone-100 flex items-center justify-between font-bold text-slate-700"
+              >
+                <span>{label}</span>
+                <span className={`w-11 h-6 rounded-full p-0.5 transition ${on ? 'bg-sky-600' : 'bg-stone-300'}`}>
+                  <span className={`block w-5 h-5 rounded-full bg-white shadow transition ${on ? 'translate-x-5' : ''}`} />
+                </span>
+              </button>
+            ))}
+            {isPhone && (
+              <div className="grid grid-cols-2 gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowOptions(false);
+                    setCountdownSheet({});
+                  }}
+                  className="h-12 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 font-bold text-sm flex items-center justify-center gap-2"
+                >
+                  <Hourglass className="w-5 h-5" /> Countdowns
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowOptions(false);
+                    setShowMagic(true);
+                  }}
+                  className="h-12 rounded-2xl bg-violet-50 border border-violet-200 text-violet-700 font-bold text-sm flex items-center justify-center gap-2"
+                >
+                  <Wand2 className="w-5 h-5" /> Magic Import
+                </button>
+              </div>
+            )}
+          </div>
+        </Sheet>
+      )}
 
       {/* Touch Event Create / Edit Modal */}
       {editingEvent && (
@@ -721,6 +1231,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           draft={editingEvent}
           members={members}
           mapsEnabled={Boolean(settings.mapsApiKeyConfigured)}
+          homeAddress={settings.homeAddress}
           onClose={() => setEditingEvent(null)}
           onSave={(updated) => saveMutation.mutate(updated)}
           onDelete={
@@ -767,6 +1278,16 @@ interface EventModalProps {
   onCountdown: (ev: Partial<CalendarEvent>) => void;
   /** Google Maps key set: place search + automatic drive time */
   mapsEnabled: boolean;
+  /** For the automatic "away from home" check */
+  homeAddress?: string;
+}
+
+/** Local date + "HH:mm" to an ISO string (midnight when the time is missing). */
+function localIso(dateStr: string, time: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const [h, mi] = (time || '0:0').split(':').map(Number);
+  const dt = new Date(y || 2000, (m || 1) - 1, d || 1, h || 0, mi || 0);
+  return Number.isNaN(dt.getTime()) ? new Date().toISOString() : dt.toISOString();
 }
 
 const TRAVEL_CHOICES = [0, 10, 15, 20, 30, 45, 60];
@@ -788,8 +1309,10 @@ const EventModal: React.FC<EventModalProps> = ({
   saving,
   onCountdown,
   mapsEnabled,
+  homeAddress,
 }) => {
   const readOnly = Boolean(draft.icsFeedId);
+  const [awayMode, setAwayMode] = useState<AwayMode>(draft.awayMode ?? null);
   // The manual override: null = automatic (Google Maps), 0 = no drive, n = n minutes.
   const [travelMinutes, setTravelMinutes] = useState<number | null>(
     draft.travelManualMinutes !== undefined ? draft.travelManualMinutes : draft.id ? draft.travelMinutes ?? null : null
@@ -881,6 +1404,7 @@ const EventModal: React.FC<EventModalProps> = ({
       memberIds,
       travelMinutes: allDay ? null : travelMinutes,
       driverMemberId,
+      awayMode,
     });
   };
 
@@ -1105,6 +1629,61 @@ const EventModal: React.FC<EventModalProps> = ({
             })}
           </div>
         </div>
+
+
+        {/* Away from home: chores for these people go up for grabs while it lasts */}
+        {(() => {
+          const effectiveEnd = endDateStr >= dateStr ? endDateStr : dateStr;
+          const autoAway = looksLikeTrip(
+            {
+              id: draft.id || 'draft',
+              title,
+              description,
+              location,
+              allDay,
+              memberIds,
+              category: draft.category ?? null,
+              startIso: allDay ? `${dateStr}T00:00:00.000Z` : localIso(dateStr, startTime),
+              endIso: allDay ? `${effectiveEnd}T23:59:59.000Z` : localIso(effectiveEnd, endTime),
+            },
+            members,
+            homeAddress
+          );
+          const options: Array<[AwayMode, string]> = [
+            [null, autoAway ? 'Auto (away ✓)' : 'Auto'],
+            ['away', 'Away'],
+            ['home', 'Not away'],
+          ];
+          return (
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-stone-400 mb-1.5">
+                Away from home
+              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                {options.map(([mode, label]) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => setAwayMode(mode)}
+                    aria-pressed={awayMode === mode}
+                    className={`h-10 min-h-[40px] px-3.5 rounded-xl text-xs font-bold border transition ${
+                      awayMode === mode
+                        ? 'bg-sky-600 text-white border-sky-600 shadow-2xs'
+                        : 'bg-stone-50 hover:bg-stone-100 text-slate-700 border-stone-200'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+                <span className="text-xs text-stone-400 font-medium">
+                  {awayMode === 'away' || (awayMode === null && autoAway)
+                    ? "Their chores go up for grabs while they're gone."
+                    : 'Auto: a vacation or trip that is not at home.'}
+                </span>
+              </div>
+            </div>
+          );
+        })()}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <PlaceInput

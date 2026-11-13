@@ -48,8 +48,12 @@ test('Mobile Companion PWA (390x844): Bottom Nav, Responsive Views & Zero Horizo
     assert.equal(await navButtons.count(), 7, 'Mobile bottom nav bar must contain 7 navigation buttons');
 
     // 3. Check Calendar View on mobile
-    await page.waitForSelector('text=5-Day');
+    await page.waitForSelector('[aria-label="List view"]');
+    await page.waitForSelector('[data-agenda-day]');
     await assertZeroHorizontalOverflow('Mobile Calendar View');
+    await page.locator('[aria-label="Month view"]').click();
+    await page.waitForSelector('[data-month-grid]');
+    await assertZeroHorizontalOverflow('Mobile Calendar Month View');
 
     // 3b. Home stacks its panels on a phone without sideways overflow
     await mobileBottomNav.locator('button', { hasText: 'Home' }).click();

@@ -444,7 +444,7 @@ test('Challenger M2: Touch Target Compliance & Multi-Viewport Overflow Stress', 
 
     // Initial check on seeded Month view event cards
     const initialMonthCards = await page.evaluate(() => {
-      const cards = Array.from(document.querySelectorAll('.grid-cols-7.grid-rows-5 button'));
+      const cards = Array.from(document.querySelectorAll('[data-month-grid] [data-month-cell] button, [data-month-grid] [data-span-bar]'));
       return cards.map((c) => {
         const r = c.getBoundingClientRect();
         return {
@@ -620,7 +620,7 @@ test('Challenger M2: Touch Target Compliance & Multi-Viewport Overflow Stress', 
 
     // Assert ALL event cards in Month view have height >= 39.5px and width >= 39.5px
     const stressedCards = await page.evaluate(() => {
-      const cards = Array.from(document.querySelectorAll('.grid-cols-7.grid-rows-5 button'));
+      const cards = Array.from(document.querySelectorAll('[data-month-grid] [data-month-cell] button, [data-month-grid] [data-span-bar]'));
       return cards.map((c) => {
         const r = c.getBoundingClientRect();
         return {
@@ -641,25 +641,34 @@ test('Challenger M2: Touch Target Compliance & Multi-Viewport Overflow Stress', 
       `Undersized cards in Month view: ${JSON.stringify(undersizedStressed, null, 2)}`
     );
 
-    // Verify "+N more" overflow chips render cleanly
-    const overflowChips = await page.evaluate(() => {
-      const chips = Array.from(document.querySelectorAll('.grid-cols-7 span.text-\\[11px\\]'));
-      return chips.map((el) => {
-        const r = el.getBoundingClientRect();
+    // Verify "+N more" chips: a full day shows whole events plus a chip for the rest (never half an event)
+    const overflowCells = await page.evaluate(() => {
+      const cells = Array.from(document.querySelectorAll('[data-month-grid] [data-month-cell]')).filter(
+        (c) => !c.classList.contains('opacity-50')
+      );
+      return ['18', '19'].map((day) => {
+        const cell = cells.find((c) => c.querySelector('span.w-7.h-7')?.textContent?.trim() === day);
+        const chip = cell?.querySelector('[data-more-chip]') as HTMLElement | null;
+        const r = chip?.getBoundingClientRect();
+        const cellRect = cell?.getBoundingClientRect();
+        const cards = Array.from(cell?.querySelectorAll('button') || []).slice(1);
+        const clipped = cards.filter((b) => b.getBoundingClientRect().bottom > (cellRect?.bottom ?? 0) + 0.5).length;
         return {
-          text: el.textContent?.trim() || '',
-          width: Math.round(r.width * 10) / 10,
-          height: Math.round(r.height * 10) / 10,
-          visible: r.width > 0 && r.height > 0,
+          day,
+          shown: cards.length,
+          more: Number((chip?.textContent || '').match(/\+(\d+)/)?.[1] || 0),
+          visible: Boolean(r && r.width > 0 && r.height > 0),
+          clipped,
         };
       });
     });
-
-    console.log('Month view overflow chips detected:', JSON.stringify(overflowChips, null, 2));
-    const chipPlusOne = overflowChips.find((c) => c.text === '+1');
-    const chipPlusThree = overflowChips.find((c) => c.text === '+3');
-    assert.ok(chipPlusOne && chipPlusOne.visible, '"+1" overflow chip must be visible for 4-event cell');
-    assert.ok(chipPlusThree && chipPlusThree.visible, '"+3" overflow chip must be visible for 6-event cell');
+    console.log('Month view overflow cells:', JSON.stringify(overflowCells));
+    const [day18, day19] = overflowCells;
+    assert.ok(day18.visible && day18.more >= 1, '"+N more" chip must be visible for the 4-event cell');
+    assert.equal(day18.shown + day18.more, 4, '4-event cell: shown + more must equal 4');
+    assert.ok(day19.visible && day19.more >= 1, '"+N more" chip must be visible for the 6-event cell');
+    assert.equal(day19.shown + day19.more, 6, '6-event cell: shown + more must equal 6');
+    assert.equal(day18.clipped + day19.clipped, 0, 'No event may be cut off at the bottom of a cell');
 
     // Verify Zero Document Horizontal AND Vertical Overflow at 1920x1080
     const docOverflow = await page.evaluate(() => {
@@ -691,7 +700,7 @@ test('Challenger M2: Touch Target Compliance & Multi-Viewport Overflow Stress', 
 
     // Verify cell content containment: no card spills outside day cell
     const cellSpills = await page.evaluate(() => {
-      const cells = Array.from(document.querySelectorAll('.grid-cols-7.grid-rows-5 > div'));
+      const cells = Array.from(document.querySelectorAll('[data-month-grid] [data-month-cell]'));
       const spills: Array<{ cellIndex: number; overflowPx: number }> = [];
       cells.forEach((cell, idx) => {
         const cellRect = cell.getBoundingClientRect();
@@ -747,7 +756,7 @@ test('Challenger M2: Touch Target Compliance & Multi-Viewport Overflow Stress', 
     console.log(`Month header navigated to: "${augHeader}"`);
 
     const augInMonthDays = await page.evaluate(() => {
-      const cells = Array.from(document.querySelectorAll('.grid-cols-7.grid-rows-5 > div'));
+      const cells = Array.from(document.querySelectorAll('[data-month-grid] [data-month-cell]'));
       const inMonthCells = cells.filter((c) => !c.classList.contains('opacity-50'));
       const dayNums = inMonthCells.map((c) => c.querySelector('span.w-7.h-7')?.textContent?.trim());
       return dayNums;

@@ -1,6 +1,6 @@
 {
   "name": "lucarne",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "private": true,
   "description": "Fast, local-first open-source family calendar, chore tracker, grocery list, and meal planner for 1080p touchscreens.",
   "type": "module",
