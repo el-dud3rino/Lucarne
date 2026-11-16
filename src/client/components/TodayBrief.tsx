@@ -33,7 +33,7 @@ export const TodayBrief: React.FC<{ settings: AppSettings; active: boolean }> = 
   if (upcoming.length === 0 && !data.dinner && choresLeft.length === 0 && data.countdowns.length === 0 && !hint) return null;
 
   return (
-    <div className="bg-black/50 backdrop-blur-md border border-white/15 rounded-3xl px-5 py-4 w-[420px] max-w-[42vw] space-y-3 text-white" data-testid="today-brief">
+    <div className="bg-black/50 backdrop-blur-md border border-white/15 rounded-3xl px-4 py-3.5 md:px-5 md:py-4 w-full md:w-[420px] md:max-w-[42vw] max-h-[55vh] overflow-hidden space-y-3 text-white" data-testid="today-brief">
       {leave && (
         <div className={`rounded-2xl px-3.5 py-2 flex items-center gap-2.5 ${leave.status === 'soon' ? 'bg-amber-400/25' : 'bg-rose-500/35'}`}>
           <Car className="w-5 h-5 shrink-0" />
@@ -55,8 +55,8 @@ export const TodayBrief: React.FC<{ settings: AppSettings; active: boolean }> = 
             return (
               <div key={e.id} className="flex items-center gap-2.5 text-base">
                 <span className="w-1.5 h-6 rounded-full shrink-0" style={{ background: eventLook(e, members).bar }} />
-                <span className="w-[72px] shrink-0 text-sm font-bold text-white/70">{e.allDay ? 'All day' : formatTimeShort(e.startIso)}</span>
-                <span className="font-bold truncate">{e.title}</span>
+                <span className="w-[64px] md:w-[72px] shrink-0 text-sm font-bold text-white/70">{e.allDay ? 'All day' : formatTimeShort(e.startIso)}</span>
+                <span className="font-bold truncate min-w-0">{e.title}</span>
               </div>
             );
           })}

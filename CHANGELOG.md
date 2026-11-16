@@ -6,6 +6,18 @@ The release workflow stops if the tagged version has no section.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-16
+
+**Phone polish.** Readable photo-frame brief, one people picker on Chores, a Meals toolbar that fits, and docs brought up to date.
+
+### Fixed
+- Photo frame on phones: today's brief was squeezed beside the clock, so event names showed only a letter or two. On phones the clock now sits above the brief, which uses the full width.
+- Chores on phones had two people pickers (the header filter and the avatar row). The avatar row is now the only one there; the header filter stays on the calendar.
+- Meals on phones: the toolbar no longer wraps into two-line buttons or cuts off **Import**. Phones get short labels (Plan, Recipes, Today, Plan week, Groceries, Import).
+
+### Docs
+- README updated for 0.2.0: phone agenda and month, swiping, multi-day bars, "+N more", Skip, away-aware chores, collapsible aisles and the phone meal list. Screenshots retaken, with new phone shots of month, chores and meals.
+
 ## [0.2.0] - 2026-11-13
 
 **Smoother on phones and on the wall.** The phone calendar is rebuilt as a list you can actually read, multi-day events are drawn once instead of on every day, and chores know when someone is away.

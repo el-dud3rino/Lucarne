@@ -19,13 +19,16 @@ Lucarne is a local-first, appliance-grade family hub designed for a `1920×1080`
   - `services/`: `google.ts` (OAuth, Calendar sync, Photos Picker), `recipes.ts` (scraping, Gemini normalization).
 - `src/client/`
   - `App.tsx`: Top-level kiosk shell, navigation, family member filter header.
-  - `views/`: `CalendarView.tsx`, `ChoresView.tsx`, `ListsView.tsx`, `MealsView.tsx`, `CookModeView.tsx`, `ScreensaverOverlay.tsx`, `SettingsView.tsx`.
+  - `views/`: `HomeView.tsx`, `CalendarView.tsx`, `ChoresView.tsx`, `ListsView.tsx`, `MealsView.tsx`, `CookModeView.tsx`, `ScreensaverOverlay.tsx`, `SettingsView.tsx`.
+  - `lib/gestures.ts`: `useIsPhone()` and `useSwipePaging()` (swipe left/right to change days, weeks or months).
   - `components/`: `OnScreenKeyboard.tsx`, `WeatherWidget.tsx`, touch modals.
 - `src/shared/`
   - `types.ts`: Shared domain interfaces.
   - `ingredientAggregator.ts`: Smart ingredient deduplication and quantity summation.
   - `groceryClassifier.ts`: Automatic grocery aisle classification.
   - `dates.ts`: Date utilities.
+  - `calendarLayout.ts`: Multi-day span bars (lane packing), and fitting whole events into a cell with a "+N more" overflow.
+  - `away.ts`: Who is away on a date (trip detection plus each event's `awayMode` override) and how that moves chores to Up for grabs.
 
 ## Feature Inventory
 | # | Feature | Description | Milestone | Source |
@@ -52,6 +55,8 @@ Lucarne is a local-first, appliance-grade family hub designed for a `1920×1080`
 | 20 | Headless Browser Playwright E2E Suite | 1920×1080 zero overflow, 40×40 targets, full user flows, Cook Mode, on-screen keyboard kiosk/mobile | Test Track | Acceptance Criteria |
 | 21 | Final E2E Test Suite Pass (Tiers 1-4) | 100% pass of all automated test suites | M5 (Phase 1) | Acceptance Criteria |
 | 22 | Adversarial Coverage Hardening (Tier 5) | White-box adversarial testing, edge case stress-testing | M5 (Phase 2) | Acceptance Criteria |
+| 23 | Fluid Phone & Wall UI (v0.2.0) | Phone agenda/month calendar, swipe paging, multi-day span bars, whole-event month cells with "+N more", phone chores/meals layouts, collapsible aisles | v0.2.0 | Skylight UI review |
+| 24 | Away-Aware Chores & Skip (v0.2.0) | Trip detection with per-event `awayMode`, away chores to Up for grabs, per-day chore skips (`chore_skips`, migration 12) | v0.2.0 | User request |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |

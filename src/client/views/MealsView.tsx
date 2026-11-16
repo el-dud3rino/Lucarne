@@ -198,29 +198,31 @@ export const MealsView: React.FC<MealsViewProps> = ({ settings }) => {
             <button
               type="button"
               onClick={() => setTab('planner')}
-              className={`h-10 min-h-[40px] px-4 py-2 rounded-xl text-sm font-bold transition flex items-center justify-center ${
+              className={`h-10 min-h-[40px] px-3 md:px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition flex items-center justify-center ${
                 tab === 'planner'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-stone-600 hover:text-slate-900'
               }`}
             >
-              Weekly Plan
+              <span className="md:hidden">Plan</span>
+              <span className="hidden md:inline">Weekly Plan</span>
             </button>
             <button
               type="button"
               onClick={() => setTab('recipes')}
-              className={`h-10 min-h-[40px] px-4 py-2 rounded-xl text-sm font-bold transition flex items-center justify-center ${
+              className={`h-10 min-h-[40px] px-3 md:px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition flex items-center justify-center ${
                 tab === 'recipes'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-stone-600 hover:text-slate-900'
               }`}
             >
-              Recipe Box ({recipes.length})
+              <span className="md:hidden">Recipes ({recipes.length})</span>
+              <span className="hidden md:inline">Recipe Box ({recipes.length})</span>
             </button>
           </div>
 
           {tab === 'planner' && (
-            <div className="flex items-center gap-1.5 ml-2">
+            <div className="flex items-center gap-1.5 md:ml-2">
               <button
                 type="button"
                 onClick={() => setWeekStart((d) => addDays(d, -7))}
@@ -231,9 +233,10 @@ export const MealsView: React.FC<MealsViewProps> = ({ settings }) => {
               <button
                 type="button"
                 onClick={() => setWeekStart(startOfWeek(new Date(), 0))}
-                className="px-3.5 h-10 rounded-xl bg-white border border-stone-200 text-xs font-bold"
+                className="px-3 md:px-3.5 h-10 rounded-xl bg-white border border-stone-200 text-xs font-bold whitespace-nowrap"
               >
-                This Week
+                <span className="md:hidden">Today</span>
+                <span className="hidden md:inline">This Week</span>
               </button>
               <button
                 type="button"
@@ -246,35 +249,38 @@ export const MealsView: React.FC<MealsViewProps> = ({ settings }) => {
           )}
         </div>
 
-        <div className="flex items-center gap-2 max-w-full overflow-x-auto">
+        <div className="flex items-center gap-1.5 md:gap-2 max-w-full overflow-x-auto" data-no-swipe>
           {tab === 'planner' && (
             <button
               type="button"
               onClick={() => setShowPlanWeek(true)}
-              className="h-11 px-4 rounded-2xl bg-white border border-emerald-300 text-emerald-800 hover:bg-emerald-50 active:scale-95 font-bold text-sm flex items-center gap-2 shadow-2xs shrink-0"
+              className="h-11 px-3 md:px-4 rounded-2xl bg-white border border-emerald-300 text-emerald-800 hover:bg-emerald-50 active:scale-95 font-bold text-sm whitespace-nowrap flex items-center gap-2 shadow-2xs shrink-0"
             >
               <CalendarCheck className="w-4 h-4" />
-              <span>Plan my week</span>
+              <span className="md:hidden">Plan week</span>
+              <span className="hidden md:inline">Plan my week</span>
             </button>
           )}
           {weekIngredients.length > 0 && (
             <button
               type="button"
               onClick={() => setShowGroceryModal(true)}
-              className="h-11 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-sm flex items-center gap-2 shadow-sm"
+              className="h-11 px-3 md:px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-sm whitespace-nowrap flex items-center gap-2 shadow-sm shrink-0"
             >
               <ShoppingCart className="w-4 h-4" />
-              <span>Send Week to Groceries ({weekIngredients.length})</span>
+              <span className="md:hidden">Groceries</span>
+              <span className="hidden md:inline">Send Week to Groceries ({weekIngredients.length})</span>
             </button>
           )}
 
           <button
             type="button"
             onClick={() => setShowImportModal(true)}
-            className="h-11 px-4 rounded-2xl bg-sky-600 hover:bg-sky-700 active:scale-95 text-white font-bold text-sm flex items-center gap-2 shadow-sm"
+            className="h-11 px-3 md:px-4 rounded-2xl bg-sky-600 hover:bg-sky-700 active:scale-95 text-white font-bold text-sm whitespace-nowrap flex items-center gap-2 shadow-sm shrink-0"
           >
             <Sparkles className="w-4 h-4" />
-            <span>Import / Discover Meals</span>
+            <span className="md:hidden">Import</span>
+            <span className="hidden md:inline">Import / Discover Meals</span>
           </button>
         </div>
       </div>

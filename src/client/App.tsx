@@ -240,8 +240,9 @@ export const App: React.FC = () => {
         </header>
 
         {/* Phones: family filter on its own row so the household name isn't squeezed */}
-        {(activeTab === 'calendar' || activeTab === 'chores') && (
-          <div className="md:hidden shrink-0 px-4 pt-2 border-b border-stone-200/60 bg-[#FAF8F5]">
+        {/* (Chores has its own avatar row on phones, so no second picker there) */}
+        {activeTab === 'calendar' && (
+          <div className="md:hidden shrink-0 px-4 pt-2 border-b border-stone-200/60 bg-[#FAF8F5]" data-testid="phone-member-filter">
             {renderMemberFilter('pb-2 [&_.member-name]:inline')}
           </div>
         )}
