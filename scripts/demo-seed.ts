@@ -111,6 +111,8 @@ runTransaction(() => {
     );
 
   // This week: a believable, busy family schedule
+  // Mom is away on a work trip: her chores move to "Up for grabs" (away-aware chores)
+  ev('Mom: Work trip to Chicago', allDay(0).start, allDay(1).end, [MOM], { allDay: true, loc: 'Chicago, IL' });
   ev('Morning Run', at(1, 6, 30), at(1, 7, 15), [DAD], { loc: 'Wash Park loop' });
   ev('Book Club', at(1, 19, 30), at(1, 21, 0), [MOM], { loc: "Jen's house" });
   ev('Leo: Science Museum Field Trip', allDay(2).start, allDay(2).end, [LEO], { allDay: true, desc: 'Packed lunch, no peanuts' });

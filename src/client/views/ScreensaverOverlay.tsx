@@ -378,12 +378,12 @@ export const ScreensaverOverlay: React.FC<ScreensaverProps> = ({
         </div>
       ) : (
         /* Daytime Bottom Appliance Clock, Weather & Next Up Overlay */
-        <div className="absolute bottom-10 left-12 right-12 z-30 flex items-end justify-between gap-6">
+        <div className="absolute bottom-6 left-4 right-4 md:bottom-10 md:left-12 md:right-12 z-30 flex flex-col items-stretch md:flex-row md:items-end md:justify-between gap-4 md:gap-6">
           <div className="space-y-1 drop-shadow-lg">
-            <div className="text-7xl font-extrabold tracking-tight leading-none">
+            <div className="text-5xl md:text-7xl font-extrabold tracking-tight leading-none">
               {now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
             </div>
-            <div className="text-2xl font-semibold text-white/85 flex items-center gap-4 pt-1">
+            <div className="text-lg md:text-2xl font-semibold text-white/85 flex flex-wrap items-center gap-x-4 gap-y-1 pt-1">
               <span>
                 {now.toLocaleDateString([], {
                   weekday: 'long',
@@ -403,7 +403,7 @@ export const ScreensaverOverlay: React.FC<ScreensaverProps> = ({
           {settings.showBriefOnScreensaver ? (
             <TodayBrief settings={settings} active={active} />
           ) : nextEvent && (
-            <div className="bg-black/45 backdrop-blur-md border border-white/15 rounded-2xl px-5 py-3.5 max-w-sm">
+            <div className="bg-black/45 backdrop-blur-md border border-white/15 rounded-2xl px-5 py-3.5 md:max-w-sm">
               <div className="text-[11px] font-bold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
                 <CalendarIcon className="w-3.5 h-3.5" />
                 Up Next

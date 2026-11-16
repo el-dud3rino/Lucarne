@@ -246,9 +246,26 @@ try {
   await phone.goto(BASE, { waitUntil: 'networkidle' });
   await settle(phone, 1500);
   await shot(phone, 'phone-calendar');
+  await phone.getByRole('button', { name: 'Month view' }).click();
+  await settle(phone);
+  await shot(phone, 'phone-month');
+  await phone.getByRole('button', { name: /Chores/ }).last().click();
+  await settle(phone);
+  await shot(phone, 'phone-chores');
+  await phone.getByRole('button', { name: /Meals/ }).last().click();
+  await phone.waitForSelector('[data-testid="meals-phone-list"]');
+  await settle(phone, 1500);
+  await shot(phone, 'phone-meals');
   await phone.getByRole('button', { name: /Lists/ }).last().click();
   await settle(phone);
   await shot(phone, 'phone-groceries');
+
+  // Photo frame on a phone: let the idle timer start it
+  const { screensaverIdleMinutes = 5 } = (await (await fetch(`${BASE}/api/settings`)).json()) as { screensaverIdleMinutes?: number };
+  await phone.clock.fastForward(screensaverIdleMinutes * 60_000 + 1000);
+  await phone.locator('[data-testid="today-brief"]').waitFor();
+  await settle(phone, 3500);
+  await shot(phone, 'phone-screensaver');
   await phone.close();
 
   await browser.close();

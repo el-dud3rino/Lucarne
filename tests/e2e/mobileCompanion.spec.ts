@@ -63,7 +63,12 @@ test('Mobile Companion PWA (390x844): Bottom Nav, Responsive Views & Zero Horizo
     // 4. Navigate to Chores View via bottom nav
     const choresTab = mobileBottomNav.locator('button', { hasText: 'Chores' });
     await choresTab.click();
-    await page.waitForSelector('text=Star Tracker');
+    await page.waitForSelector('[role="tablist"][aria-label="Whose chores"]');
+    assert.equal(
+      await page.locator('[data-testid="phone-member-filter"]').count(),
+      0,
+      'Chores on phones has one people picker (the avatar row), not the header filter too'
+    );
     await assertZeroHorizontalOverflow('Mobile Chores View');
 
     // 5. Navigate to Lists View via bottom nav
@@ -83,7 +88,12 @@ test('Mobile Companion PWA (390x844): Bottom Nav, Responsive Views & Zero Horizo
     // 6. Navigate to Meals View via bottom nav
     const mealsTab = mobileBottomNav.locator('button', { hasText: 'Meals' });
     await mealsTab.click();
-    await page.waitForSelector('text=Weekly Plan');
+    await page.waitForSelector('[data-testid="meals-phone-list"]');
+    // Toolbar labels stay on one line on phones (no "Weekly / Plan" wrapping)
+    for (const label of ['Plan', 'Today', 'Import']) {
+      const box = await page.getByRole('button', { name: label, exact: true }).boundingBox();
+      assert.ok(box && box.height <= 48, `Meals "${label}" button should be one line on phones (height ${box?.height})`);
+    }
     await assertZeroHorizontalOverflow('Mobile Meals View');
 
     // 7. Navigate to Settings View via bottom nav

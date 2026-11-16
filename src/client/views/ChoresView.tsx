@@ -76,7 +76,10 @@ export const ChoresView: React.FC<ChoresViewProps> = ({ members, selectedMemberI
   const [kidMember, setKidMember] = useState<FamilyMember | null>(null);
   const isPhone = useIsPhone();
   /** Phones show one person at a time ('shared' = Up for grabs) */
-  const [phoneMemberId, setPhoneMemberId] = useState<string | null>(null);
+  // Start on the person picked in the header elsewhere (e.g. on the calendar), if exactly one was
+  const [phoneMemberId, setPhoneMemberId] = useState<string | null>(() =>
+    selectedMemberIds.length === 1 ? selectedMemberIds[0] : null
+  );
   const [page, setPage] = useState<{ direction: 'left' | 'right' | null; key: number }>({ direction: null, key: 0 });
   const stepDay = (dir: -1 | 1) => {
     setPage((p) => ({ direction: dir === 1 ? 'left' : 'right', key: p.key + 1 }));
@@ -91,9 +94,10 @@ export const ChoresView: React.FC<ChoresViewProps> = ({ members, selectedMemberI
   );
 
   const visibleMembers = useMemo(() => {
-    if (selectedMemberIds.length === 0) return individualMembers;
+    // Phones pick a person with the avatar row on this page, so the header filter doesn't apply here
+    if (isPhone || selectedMemberIds.length === 0) return individualMembers;
     return individualMembers.filter((m) => selectedMemberIds.includes(m.id));
-  }, [individualMembers, selectedMemberIds]);
+  }, [individualMembers, selectedMemberIds, isPhone]);
 
   const queryKey = ['chores', dateStr];
   const { data } = useQuery({

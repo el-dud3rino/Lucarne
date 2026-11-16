@@ -10,11 +10,11 @@ Inspired by the Skylight Calendar, but self-hosted: your family's data lives in 
 
 <table>
   <tr>
-    <td colspan="2"><img src="docs/screenshots/calendar-5day.jpg" alt="5-day family calendar"><br><sub><b>5-day calendar</b>: shared events get a diagonal band of each person's color, and drive times show when to leave</sub></td>
+    <td colspan="2"><img src="docs/screenshots/calendar-5day.jpg" alt="5-day family calendar"><br><sub><b>5-day calendar</b>: trips and visits span the days as one bar, shared events get a diagonal band of each person's color, and drive times show when to leave</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/screenshots/calendar-month.jpg" alt="Month view with birthdays and holidays"><br><sub><b>Month view</b>: birthdays 🎂 and holidays 🎉 in their own colors</sub></td>
-    <td width="50%"><img src="docs/screenshots/chores.jpg" alt="Chores per person with stars"><br><sub><b>Chores</b>: per-person chores and stars</sub></td>
+    <td width="50%"><img src="docs/screenshots/calendar-month.jpg" alt="Month view with birthdays and holidays"><br><sub><b>Month view</b>: whole events only, with a "+N more" chip when a day is full; birthdays 🎂 and holidays 🎉 in their own colors</sub></td>
+    <td width="50%"><img src="docs/screenshots/chores.jpg" alt="Chores per person with stars, one person away"><br><sub><b>Chores</b>: per-person chores and stars; Mom's on a trip, so hers are up for grabs</sub></td>
   </tr>
   <tr>
     <td><img src="docs/screenshots/routines.jpg" alt="Morning and bedtime routines as checklists"><br><sub><b>Routines</b>: step-by-step morning and bedtime checklists</sub></td>
@@ -46,10 +46,12 @@ Inspired by the Skylight Calendar, but self-hosted: your family's data lives in 
 </table>
 
 <p>
-  <img src="docs/screenshots/phone-calendar.jpg" alt="Phone companion: calendar" width="240">
-  &nbsp;
-  <img src="docs/screenshots/phone-groceries.jpg" alt="Phone companion: grocery list" width="240">
-  <br><sub><b>Phone companion</b>: the same app on any phone on your Wi-Fi</sub>
+  <img src="docs/screenshots/phone-calendar.jpg" alt="Phone companion: calendar agenda" width="190">
+  <img src="docs/screenshots/phone-month.jpg" alt="Phone companion: month with event dots" width="190">
+  <img src="docs/screenshots/phone-chores.jpg" alt="Phone companion: chores with a row of avatars" width="190">
+  <img src="docs/screenshots/phone-meals.jpg" alt="Phone companion: breakfast, lunch and dinner for each day" width="190">
+  <img src="docs/screenshots/phone-groceries.jpg" alt="Phone companion: grocery list" width="190">
+  <br><sub><b>Phone companion</b>: the same app on any phone on your Wi-Fi: an agenda or month calendar, one person's chores at a time, the week's meals and the grocery list</sub>
 </p>
 
 <sub>Screenshots show a fictional demo household (<code>npm run demo:seed</code>).</sub>
@@ -86,12 +88,16 @@ Inspired by the Skylight Calendar, but self-hosted: your family's data lives in 
 - Phones still open on the calendar; Home is one tap away in the bottom bar.
 
 **Calendar**
-- 5-day, week, month (5- or 6-week grid), and per-person column views, tuned for 1080p touch.
+- On the wall: 5-day, per-person, week and month (5- or 6-week grid) views, tuned for 1080p touch. **Swipe** left or right to move through dates.
+- On phones: a compact **agenda** (dates down the side, one row per event, empty days skipped) or a **month** grid with a colored dot per person; tap a day to see its events. The heading always shows which dates you're looking at, and a **Today** button brings you back.
+- **Multi-day events** (trips, camps, visitors) are drawn once as a bar across the days, not repeated in every day. On phones, later days show a slim "Day 2 of 3" row.
+- **Month view never cuts an event in half:** each day shows as many as fit, and a **+N more** chip opens the full day.
+- Past events fade, so what's still ahead stands out.
 - Two-way Google Calendar sync for **multiple Google accounts** (for example, yours and your partner's). Changes arrive incrementally every 90 seconds, and an offline queue holds edits made while the internet is down.
 - Each calendar can belong to **one or more people**. A "Twins" calendar, for example, shows on both twins' columns and filters.
-- **Birthdays 🎂 and holidays 🎉** get their own colors, with toolbar toggles to show or hide them. Google's holiday and birthday calendars are recognized automatically, and a birthday that appears in two calendars shows once.
+- **Birthdays 🎂 and holidays 🎉** get their own colors, with a **Filter** menu to show or hide them (and dinner and weather on the calendar). Google's holiday and birthday calendars are recognized automatically, and a birthday that appears in two calendars shows once.
 - **10-day weather** on each day, plus tonight's dinner on the calendar. Set the location by typing "City, State" in Settings, and Lucarne looks up its coordinates.
-- Recurring and multi-day events, and color-coded family members with tap-to-filter.
+- Recurring events, and color-coded family members with tap-to-filter.
 - **Colors for shared events:** an event for several people is split into diagonal bands, one per person in their color, and a Family event shows everyone's, so you can tell at a glance who it's for.
 - **Calendar links (read-only):** subscribe to any `.ics` / `webcal://` link, such as a school district calendar, TeamSnap or GameChanger schedule, or a family member's iCloud or Outlook calendar. Assign it to people, and it refreshes every 30 minutes.
 - **Magic Import** (with a Gemini key): take a photo of a school flyer, sports schedule or invitation, or paste an email, and Lucarne finds the dates. You review and edit every event before anything is added.
@@ -102,6 +108,9 @@ Inspired by the Skylight Calendar, but self-hosted: your family's data lives in 
 
 **Chores, routines, habits & rewards**
 - Chores for morning, afternoon, evening or anytime (daily, weekdays, weekends, specific days, or one-off). Chores can be assigned or "up for grabs".
+- **Skip for today:** a sick day or a rained-out chore can be skipped without counting as missed. Tap again to undo.
+- **Away-aware chores:** when someone is on a trip, their chores move to **Up for grabs** so anyone can do them for the stars. A trip is an all-day or multi-day event such as "Beach vacation" or "Work trip to Chicago" that is tagged with just that person and isn't at your home address. Each event has an **Away from home** setting (Auto, Away, Not away) to override the guess. A Family event never sends everyone away automatically; set it to Away when the whole family is leaving.
+- On phones, a row of avatars picks whose chores to show (with an Away badge), and swiping changes the day.
 - **Routines:** ordered checklists like "School morning" or "Bedtime", one per child, with step emojis and ready-made templates. An optional star bonus is given when every step is done. The routine for the current time of day shows first.
 - **Habits:** daily goals like water, reading minutes or piano, with a 7-day strip and a 🔥 streak.
 - **Rewards:** set up rewards ("Pick the movie · 15 ⭐"), redeem them to spend stars, and see the history with undo. Stars come from chores and finished routines, for kids *and* parents.
@@ -111,6 +120,7 @@ Inspired by the Skylight Calendar, but self-hosted: your family's data lives in 
 - Multiple lists, with groceries auto-sorted by store aisle and quantities merged ("2 cans" + "1 can").
 - Aisles are picked by the most specific match ("chicken broth" goes to Pantry, not Meat). If one is wrong, tap **⇄** on the item to move it, and Lucarne remembers that choice every time the item is added again.
 - **Store order:** arrange the aisles in the order you walk your store.
+- Tap an aisle to collapse it (each device remembers), and checked items tuck into a **Completed** section you can show or hide.
 - **Usual items:** one-tap tiles for what your family adds most often (learned from the list, and never from recipe ingredients). Items already on the list are hidden, and **Edit** removes a tile.
 - Live updates between the wall and phones.
 
@@ -120,6 +130,7 @@ Inspired by the Skylight Calendar, but self-hosted: your family's data lives in 
 - **Meal search** (with a Gemini key): describe what you want ("easy chicken tacos") and get **real recipes from real recipe sites**, with their own photos. Results come first from popular food blogs' own site search, and Gemini suggests more only when that finds too few. Nothing is invented: every result is a page Lucarne opened and verified.
 - A **recipe preview** with servings, prep and cook time, and calories, protein, carbs and fat per serving, as published by the site.
 - **Plan my week:** fills the empty dinner nights **only with recipes from your own Recipe Box**. With a Gemini key it picks for variety and follows notes like "quick on Tuesday, no fish". Without a key, or when Gemini is busy, it rotates your recipes, favorites and least-recently-cooked first. You can swap any night before saving.
+- On phones, the week is a list with **Breakfast, Lunch and Dinner** for each day, opening on today. Swipe to change weeks.
 - Send a week's ingredients to the grocery list, combining duplicates.
 - Bulk import from a JSON file of meals.
 
@@ -365,7 +376,7 @@ sudo -u lucarne nano .env        # add your Google client ID/secret (see above)
 **Or skip the build with a release download.** Each [GitHub release](https://github.com/el-dud3rino/Lucarne/releases) has a prebuilt `lucarne-vX.Y.Z.tar.gz`. It installs faster and needs no build tools:
 ```bash
 sudo useradd --system --create-home --shell /usr/sbin/nologin lucarne
-curl -fsSL -o /tmp/lucarne.tar.gz https://github.com/el-dud3rino/Lucarne/releases/download/v0.1.0/lucarne-v0.1.0.tar.gz
+curl -fsSL -o /tmp/lucarne.tar.gz https://github.com/el-dud3rino/Lucarne/releases/download/v0.2.1/lucarne-v0.2.1.tar.gz
 sudo mkdir -p /opt/lucarne
 sudo tar -xzf /tmp/lucarne.tar.gz -C /opt/lucarne --strip-components=1
 sudo chown -R lucarne:lucarne /opt/lucarne
@@ -413,7 +424,7 @@ sudo -u lucarne npm run keep:login
 
 ## Phone companion
 
-Any phone on your Wi-Fi can open `http://<lucarne-address>:3001`; the address is shown in **Settings**. Use **Add to Home Screen** for an app-like icon. Phones get a bottom tab bar and use their own keyboard. To use it away from home, put the device on a private network such as [Tailscale](https://tailscale.com) rather than exposing it to the internet.
+Any phone on your Wi-Fi can open `http://<lucarne-address>:3001`; the address is shown in **Settings**. Use **Add to Home Screen** for an app-like icon. Phones get a bottom tab bar and use their own keyboard, plus layouts made for one hand: the calendar as an agenda or month, chores one person at a time, meals as a daily list, and swiping to change days. Add an event with the **+** button in the corner; birthdays, holidays, countdowns and Magic Import are under the **⋯** menu. To use it away from home, put the device on a private network such as [Tailscale](https://tailscale.com) rather than exposing it to the internet.
 
 ## Updating, backups & troubleshooting
 
